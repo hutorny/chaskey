@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Crypto Probe</title>
+<link rel="stylesheet" href="/r/css/responsive.css">
+<script type="text/javascript" src="../chaskey.js"></script>
+<script type="text/javascript" src="chaskey_test.js"></script>
+<style type="text/css">
+body {
+	background: #FFFFFC !important;
+	color: #0D0300
+}
+
+*:focus {
+    outline: none;
+}
+
+input:focus {
+    border-width: 2px;
+}
+
+::-webkit-input-placeholder { 
+	color: rgba(0, 0, 0, 0.5);	
+	font-style: italic;
+}
+::-moz-placeholder{ 
+	color: rgba(0, 0, 0, 0.5);	
+	font-style: italic;
+}
+:-ms-input-placeholder{ 
+	color: rgba(0, 0, 0, 0.5);	
+	font-style: italic;
+}
+
+textarea {
+    display: block;
+}
+
+a {
+    color: #993000;
+}
+hr {
+	background: #1A0600;
+}
+a:hover, a:focus, a:active {
+    color: #CC4600;
+}
+
+fieldset {
+	border-radius: 4px;
+	vertical-align: top;
+	padding-bottom: 0.4em;
+	margin: 0 1px 0.4em 1px;	
+}
+
+.table-cell {
+	display: table-cell;
+	width: 45%;
+}
+
+.table-cell.narrow {
+	width: 12em;
+	padding-left: 0.5em;
+	padding-right: 0.5em;
+}
+
+.actions {
+	text-align: center;
+	min-width:  6em;
+	margin-top: 0.5em;
+	line-height: 2em;
+}
+
+.actions > button {
+	width: 100%;
+}
+
+.test-fail > span:first-child,
+.test-error> span:first-child,
+.test-info > span:first-child,
+.test-debug> span:first-child {
+	font-family: monospace;
+	font-weight: bold; 
+	white-space: pre;
+}
+
+.test-fail {
+	color: #C00;
+}
+
+.test-error > span:first-child {
+	color: darkred;
+}
+
+.test-debug {
+	color: #666;
+}
+
+.fatal {
+	color:red;
+	font-size:2em;
+	font-weight: bold; 
+}
+
+#content {
+	max-width: 80em;
+	margin-left:auto;
+	margin-right:auto;
+}
+
+#key-nonce > span > label {
+	width: 3.5em;
+}
+
+#key-nonce > span:first-child > label {
+	margin-right: 0.5em;
+}
+
+#key-nonce > span:last-child > input {
+	width: calc(100% - 1em);
+}
+
+
+#key-nonce > span {
+	text-align: right;
+}
+
+#key-nonce > span > input {
+	width: calc(100% - 5.3em);
+}
+
+button#sign:after,
+button#encrypt:after {
+	content: "⇒";
+	float: right;
+	font-weight: bold; 
+
+}
+button#decrypt:before {
+	content: "⇐";
+	float: left;
+	font-weight: bold; 
+}
+
+#copyright {
+	text-align: center;
+	font-size: 80%;
+	color: #330C00;
+	opacity: 0.6;
+    position: absolute;
+    left: calc(50% - 141px);
+    bottom : 0;
+}
+
+#copyright #copyright-email:before {
+	content: 'eugene';
+}
+
+#copyright #copyright-email:after {
+	content: 'hutorny.in.ua';
+}
+
+
+</style>
+</head>
+<body>
+<div id="content">
+<p>This page provides testing and demonstration facilities for 
+<a href="http://mouha.be/chaskey/">Chaskey  Cipher algorithm</a> in 
+<a href="http://csrc.nist.gov/groups/ST/toolkit/BCM/current_modes.html">
+MAC and CBC modes</a>
+<fieldset>
+	<legend>
+		<label>Chaskey  Cipher Demo</label>
+	</legend>
+	<div id="key-nonce">
+		<span class="table-cell"><label>Key</label><input id="key" placeholder="Enter a key"></span>		
+		<span class="table-cell narrow"><label>Nonce</label></span>
+		<span class="table-cell"><input id="nonce" placeholder="Enter a nonce"></span>
+	</div>
+	<div class="table-cell">
+		<label>Message</label>
+		<textarea  id="message" rows="6" placeholder="Enter a message"></textarea>
+	</div>
+    <div class="table-cell narrow">
+		<div>		
+	    	<label>Show as</label>
+	    	<select id="format">
+				<option value="base-64">base-64</option>
+				<option value="bytestring">bytestring</option>
+			</select>
+		</div>
+		<div class="actions">
+			<button id="encrypt">Encrypt</button>
+			<button id="decrypt">Decrypt</button>
+			<button id="sign">Sign</button>
+		</div>
+	</div>
+	<div class="table-cell">
+		<label>Chiphertext</label>
+		<textarea id="ciphertext" rows="6" placeholder="Enter a ciphertext"></textarea>
+	</div>
+</fieldset>
+</div>
+<div id="copyright">Copyright &copy; 2017 Eugene Hutorny <span id="copyright-email">@</span></div>
+<hr>
+<script type="text/javascript">
+/* conver array buffer to base64
+btoa(String.fromCharCode.apply(null, new Uint8Array(buffer))); 
+ */
+//try { 
+	var test = new ChaskeyTests();
+	test.run();
+	test.demo();
+try{
+	
+}
+catch(e) { 
+	var div = document.createElement('div');
+	div.setAttribute('class','fatal');
+	div.innerHTML = e.message;
+	document.body.appendChild(div)	
+}
+</script>
+</body>
+</html>

@@ -69,11 +69,11 @@ Table below lists benchmarking results for 1M operations on a 32-bytes-long mess
 |Photon      |   120 | STM32F   | ARM 32    |   3,176 |   2,441 |   2,455 |   2,154 |   3,051 |
 |Teensy3     |    72 | MK20DX   | ARM 32    |   6,513 |   5,053 |   4,886 |   4,384 |   6,849 |
 |NodeMCU<sup>*</sup>|80| LX106  | RISC 32   |-- N/A --|   8,490 |   9,310 |  11,590 |  10,930 |
-|MSP430      |     8 | MSP430   | CISC 16   |-- N/A --| 431,000 | 398,000 | 388,000 | 577,000 |
-|Arduino Mega|     8 |ATmega2560| AVR 8     | 763,000 | 744,000 | 746,000 | 740,000 | 822,000 |
+|MSP430<sup>*</sup>|     8 | MSP430   | CISC 16   |-- N/A --| 431,000 | 398,000 | 388,000 | 577,000 |
+|Arduino Mega<sup>*</sup>|8 |ATmega2560|AVR 8|763,000 | 744,000 | 746,000 | 740,000 | 822,000 |
 
-Values are give in ms, All binaries were compiled with gcc option -O3 -- Optimize most.<br> 
-<sup>*</sup>NodeMCU values are extrapolated from tests with 100K operations
+Values are give in ms, All binaries were compiled with gcc option `-O3` -- Optimize most.<br> 
+<sup>*</sup>NodeMCU, MSP430 and Arduino Mega results are extrapolated from tests with 100K operations
 
 Next table shows same results in normilized form - clock cycles per one operation
 

@@ -114,10 +114,10 @@ function block32x4(a) {
 			this.dnour(v);
 		}
 	}
-	this.derive = function(i) {		
-		var C  = (i[3] >>> 31) ? 0x87 : 0x00;
+	this.derive = function(i) {
+		i = i.v || i;
 		return new this.block_t([
-			(i[0] << 1) ^ C,
+			(i[0] << 1) ^((i[3] >>  31) & 0x87), /* >> for signed shift */
 			(i[1] << 1) | (i[0] >>> 31),
 			(i[2] << 1) | (i[1] >>> 31),
 			(i[3] << 1) | (i[2] >>> 31)]);
@@ -279,9 +279,11 @@ function Cbc(cipher, formatter) {
 	function encrypt(block) {
 		cipher.xor(block);
 		cipher.permute(block);
+		cipher.xor(key);
 	}	
 	function decrypt(input) {
 		var output = new cipher.block_t(input);
+		output.xor(key);
 		cipher.etumrep(output.block());
 		output.xor(cipher.block());
 		cipher.init(input);
@@ -300,13 +302,13 @@ function Cbc(cipher, formatter) {
 		 * IV generation, recommended method number first.
 		 * Apply the forward cipher function, under the same key that is
 		 * used for the encryption of the plaintext, to a nonce				 */
-		cipher.init(key);
+		cipher.init(cipher.derive(key));
 		buff.reset();
 		buff.append(nonce);
 		do {
 			encrypt(buff.block());
-		} while(buff.next());		
-		buff.reset();
+		} while(buff.next());
+		buff.reset();		
 	}
 	this.encrypt = function(message, last) {		
 		if( key === null ) throw new Error("key is not set");		

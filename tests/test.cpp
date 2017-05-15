@@ -61,14 +61,11 @@ namespace test_compile {
 		TestMac.verify(data);
 	}
 }
-};
+}
 
-
-//#ifdef CHASKEY_HEAD2HEAD_TEST
 extern void (*chaskey_cpp)(uint8_t *, uint32_t, const uint8_t *, const uint32_t,
 		const uint32_t [4], const uint32_t [4], const uint32_t [4]);
 extern void (*subkeys_cpp)(uint32_t [4], uint32_t [4], const uint32_t [4]);
-//#endif
 
 using namespace crypto;
 using namespace chaskey;

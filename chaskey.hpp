@@ -63,6 +63,7 @@ public:
 	operator block_t&() noexcept { return data; }
 	static constexpr uint_fast8_t size() noexcept { return sizeof(data); }
 	inline void init(const block_t& block) noexcept { operator=(block);	}
+	static inline void derive(block_t&, const block_t&) noexcept {}
 	static inline constexpr
 	BlockCipherPrototype& cast(Block& block) noexcept {
 		return static_cast<BlockCipherPrototype&>(block);
@@ -79,7 +80,7 @@ private:
  * BlockCipher in the Cipher Block Chaining Mode (CBC)
  * In this mode BlockCipher is used to encrypt and decrypt messages
  * http://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
- * chater 6.2
+ * chapter 6.2
  */
 template<class Cipher, class Formatter>
 class Cbc : protected Cipher {
@@ -115,8 +116,16 @@ public:
 		/* NIST Special Publication 800-38a
 		 * IV generation, recommended method number first.
 		 * Apply the forward cipher function, under the same key that is
-		 * used for the encryption of the plaintext, to a nonce				 */
-		Cipher::init(key);
+		 * used for the encryption of the plaintext, to a nonce
+		 *
+		 * http://web.cs.ucdavis.edu/~rogaway/papers/modes.pdf 1.9.3, page 8
+		 * Appendix C of NIST SP 800-38A is wrong to recommend that, to create
+		 * the IV for CBC or CFB modes, one can “apply the forward cipher
+		 * function, under the same key that is used for encryption
+		 * of the plaintext, to a nonce”	  								*/
+		block_t subkey;
+		Cipher::derive(subkey,key);
+		Cipher::init(subkey);
 		const uint8_t* msg = (const uint8_t*)nonce;
 		do {
 			encrypt(msg, len, true);
@@ -171,9 +180,12 @@ protected:
 	inline void encrypt(const block_t& input) noexcept {
 		*this  ^= input;
 		Cipher::permute();
+		/* cipher stores only its state, so the key is applied here		*/
+		*this  ^= key;
 	}
 	inline void decrypt(const block_t& input, Block& output) noexcept {
 		output = input;
+		output ^= key;
 		Cipher::cast(output).etumrep();
 		output ^= *this;
 		static_cast<Block&>(*this) = input; /* Block is not directly visible */
@@ -208,6 +220,7 @@ public:
 		key = _key;
 		Cipher::derive(subkey1, key);
 		Cipher::derive(subkey2, subkey1);
+		init();
 	}
 	/** initializes cipher 													*/
 	inline void init() noexcept { Cipher::init(key); }
@@ -215,14 +228,12 @@ public:
 	 *  final finishes generation by padding the message to the size of
 	 *  block and applying one of derived keys  							*/
 	inline void update(const uint8_t* msg, size_t len, bool final) noexcept {
-		Block* finalkey = nullptr;
+		Block* finalkey = &subkey1;
 		do {
 			buff.append(msg, len);
 			if( ! len ) {
 				if( final ) {
-					if( buff.full() )
-						finalkey = &subkey1;
-					else {
+					if( ! buff.full() ) {
 						buff.pad(1);
 						finalkey = &subkey2;
 					}
@@ -550,11 +561,11 @@ public:
 	/** shifts entire block one bit left and distorts lowest byte  */
 	static inline void derive(block_t& v, const block_t& in) noexcept {
 		/* operations reordered to make it callable on self */
-		const item_t C = (in[3] >> (32-1)) ? 0x87 : 0x00;
+		item_t C =  static_cast<int32_t>(in[3]) >> (32-1); /* replicate sign bit */
 		v[3] = (in[3] << 1) | (in[2] >> (32-1));
 	    v[2] = (in[2] << 1) | (in[1] >> (32-1));
 	    v[1] = (in[1] << 1) | (in[0] >> (32-1));
-	    v[0] = (in[0] << 1) ^ C;
+	    v[0] = (in[0] << 1) ^ (C & 0x87);
 	}
 	static constexpr const Cipher& cast(const void* blk) noexcept {
 		return static_cast<const Cipher&>(base::cast(blk));

@@ -197,7 +197,8 @@ struct hexwrapper {
 	ostream& out;
 	void write(const char* data, size_t len) {
 		while(len--) {
-			out << hex << setw(2) << setfill('0') << unsigned(*data++);
+			out << hex << setw(2) << setfill('0') <<
+					(static_cast<unsigned>(*data++) & 0xFF);
 		}
 	}
 };
@@ -315,7 +316,7 @@ bool make_masters(int param) {
 int main(int argc, char * const argv[]) {
 	options opts = {};
 	block_t key, iv {};
-	opts.hexout = isatty(fileno(stdin));
+	opts.hexout = isatty(fileno(stdout));
 	try {
 	if(argc < 1 && isatty(fileno(stdin)) )
 	    cerr << "Processing stdin to stdout with a default key" << endl;

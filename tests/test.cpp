@@ -30,6 +30,16 @@
 #include "chaskey.h"
 #include "chaskey.hpp"
 #include "miculog.hpp"
+#ifdef WITH_AES128CLOC_TEST
+	extern "C" {
+#	include "cloc.h"
+	}
+#endif
+#ifdef WITH_CHACHA_TEST
+	/* https://rweather.github.io/arduinolibs/classChaCha.html			*/
+#	include <ChaCha.h>
+#endif
+// chacha takes ~6200 bytes of ROM on AVR
 
 struct memcpywrapper {
 	uint8_t * data;
@@ -58,7 +68,7 @@ namespace test_compile {
 		TestCbc.decrypt(memcpywrapper{data}, data, sizeof(data));
 		TestMac.update(data, sizeof(data), true);
 		TestMac.write(memcpywrapper{data});
-		TestMac.verify(data);
+		TestMac.verify((const block_t*)data);
 	}
 }
 }
@@ -71,7 +81,7 @@ using namespace crypto;
 using namespace chaskey;
 
 struct Test {
-	static const uint8_t * const masters[63];
+	static const uint8_t * const masters[79];
 	static const block_t vectors[64];
 	static const char plaintext[];
 };
@@ -174,7 +184,7 @@ struct blockassignwrapper {
 };
 unsigned long bench_mac(unsigned long count) {
 	crypto::chaskey::Cipher8::Mac mac;
-	block_t key{};
+	const block_t& key{Test::vectors[0]};
 	crypto::chaskey::Cipher8::Block result;
 	mac.set(key);
 	auto start = milliseconds();
@@ -186,10 +196,62 @@ unsigned long bench_mac(unsigned long count) {
 	return milliseconds() - start;
 }
 
+#ifdef WITH_AES128CLOC_TEST
+unsigned long bench_aes128cloc(unsigned long count) {
+	const block_t& key{Test::vectors[0]};
+	byte ad[32] {}, nonce[16] {}, pt[32];
+
+	ae_cxt ctx {};
+	ae_init(&ctx, reinterpret_cast<const byte*>(&key), sizeof(key));
+	auto start = milliseconds();
+	while(count--) {
+		process_ad(&ctx, ad, sizeof(ad), nonce, sizeof(nonce));
+		ae_encrypt(&ctx, pt, sizeof(pt), ad, nonce, sizeof(nonce), ENC);
+	}
+	return milliseconds() - start;
+}
+#endif
+
+#ifdef	WITH_CHACHA_TEST
+unsigned long bench_chacha(unsigned long count) {
+	const block_t& key{Test::vectors[0]};
+	const block_t& iv{Test::vectors[1]};
+
+	uint8_t result[32];
+	ChaCha cbc(8);
+	cbc.setKey((const uint8_t*)key, sizeof(key));
+	auto start = milliseconds();
+	while(count--) {
+		cbc.setIV((const uint8_t*)iv, sizeof(iv));
+		cbc.encrypt(result,result,sizeof(result));
+	}
+	return milliseconds() - start;
+}
+#endif
+
+
 static crypto::chaskey::Cipher8::Block result[2];
 
+
+unsigned long bench_cloc(unsigned long count) {
+	const block_t& key{Test::vectors[0]};
+	uint8_t ad[32] {}, nonce[16] {}, pt[32];
+	crypto::Cloc<crypto::chaskey::Cipher8,
+		details::block_formatter<crypto::chaskey::Cipher8::item_t, crypto::chaskey::Cipher8::count>> cloc;
+	cloc.set(key);
+	cloc.init();
+	auto start = milliseconds();
+	while(count--) {
+		cloc.update(ad, sizeof(ad), true);
+		cloc.nonce(nonce, sizeof(nonce));
+		cloc.encrypt(blockassignwrapper{result[0]},pt,sizeof(pt),true);
+	}
+	return milliseconds() - start;
+}
+
 unsigned long bench_encrypt(unsigned long count) {
-	block_t key{}, iv{};
+	const block_t& key{Test::vectors[0]};
+	const block_t& iv{Test::vectors[1]};
 	crypto::chaskey::Cipher8::Cbc cbc;
 	cbc.set(key);
 	auto start = milliseconds();
@@ -201,7 +263,8 @@ unsigned long bench_encrypt(unsigned long count) {
 }
 
 unsigned long bench_decrypt(unsigned long count) {
-	block_t key{}, iv{};
+	const block_t& key{Test::vectors[0]};
+	const block_t& iv{Test::vectors[1]};
 	crypto::chaskey::Cipher8::Cbc cbc;
 	cbc.set(key);
 	auto start = milliseconds();
@@ -214,8 +277,16 @@ unsigned long bench_decrypt(unsigned long count) {
 
 
 bool bench(unsigned long count) {
-	log.info("|%-12s|%-12s|%-12s|%-12s|%-12s|\n",
+	log.info("|%-12s|%-12s|%-12s|%-12s|%-12s|",
 			"  Ref MAC", "  Cpp MAC", "   MAC"," Encrypt", " Decrypt");
+#	ifdef WITH_AES128CLOC_TEST
+	log.info("%-12s|"," aes128cloc");
+#	endif
+	log.info("%-12s|","   CLOC");
+#	ifdef WITH_CHACHA_TEST
+	log.info("%-12s|","  ChaCha");
+#	endif
+	log.info("\n");
 	if( chaskey_cpp == &::chaskey )
 		log.warn("|%-12s", " -- N/A --");
 	else
@@ -223,8 +294,16 @@ bool bench(unsigned long count) {
 	log.warn("|%8lu%4s", bench_cppmac(count),"");
 	log.warn("|%8lu%4s", bench_mac(count),"");
 	log.warn("|%8lu%4s", bench_encrypt(count),"");
-	log.warn("|%8lu%4s|", bench_decrypt(count),"");
-	log.warn("\n");
+	log.warn("|%8lu%4s", bench_decrypt(count),"");
+#	ifdef WITH_AES128CLOC_TEST
+	log.warn("|%8lu%4s", bench_aes128cloc(count),"");
+#	endif
+	log.warn("|%8lu%4s", bench_cloc(count),"");
+#	ifdef WITH_CHACHA_TEST
+	log.warn("|%8lu%4s", bench_chacha(count),"");
+#	endif
+
+	log.warn("|\n");
 	return true;
 }
 
@@ -332,7 +411,7 @@ unsigned test_mac(const block_t& v) {
 		mac.update(msg, i, true);
 		if( ! mac.verify(tag) ) {
 			block_t got = {};
-			mac.write(memcpywrapper{(uint8_t*)&got, sizeof(got)});
+			mac.write(memcpywrapper{(uint8_t*)&got, 0});
 			log.block(level::fail, "test_mac/verify        :", got);
 			log.block(level::error,"expected               :", tag);
 			log.error("message                :'%.*s' %d bytes\n", i, msg, i);
@@ -350,11 +429,11 @@ unsigned test_mac(const block_t& v) {
 	chaskey_cpp((uint8_t*)&tag, sizeof(tag), (uint8_t*)(Test::plaintext), len, v, subkey1, subkey2);
 	if( ! mac.verify(tag) ) {
 		block_t got = {};
-		mac.write(memcpywrapper{(uint8_t*)&got, sizeof(got)});
+		mac.write(memcpywrapper{(uint8_t*)&got, 0});
 		log.block(level::fail, "test_mac/update        :", got);
 		log.block(level::error,"expected               :", tag);
 		log.error("message                :'%.*s'\n", len, Test::plaintext);
-		res = false;
+		++res;
 	}
 	return res;
 }
@@ -371,39 +450,13 @@ unsigned test_cbc(const block_t& v) {
 	cbc.set(v);
 	for(auto i: {7, 8, 9, 15, 16, 17, 31, 32, 33, 47, 48, 49, 50}) {
 		cbc.init(iv);
-		memcpywrapper wrp{tmp};
+		memcpywrapper wrp{tmp, 0};
 		cbc.encrypt(wrp, (const uint8_t*)Test::plaintext, i, true);
 		cbc.init(iv);
-		cbc.decrypt(memcpywrapper{plain}, tmp, wrp.size);
+		cbc.decrypt(memcpywrapper{plain,0}, tmp, wrp.size);
 		if( strncmp(Test::plaintext,(const char*)plain, i) != 0) {
 			log.fail( "test_cbc               :\t'%.*s'\n", i, Test::plaintext);
 			log.error("got                    :\t'%.*s'\n", i, plain);
-			++res;
-		}
-	}
-	return res;
-}
-
-/**
- * test CBC adinst masters
- */
-unsigned test_master() {
-	unsigned res = 0;
-	uint8_t tmp[64];
-	for(int i = 1; i < 64; ++i) {
-		crypto::chaskey::Cipher8::Cbc cbc;
-		cbc.set(Test::vectors[i]);
-		cbc.init(iv);
-		memcpywrapper out{tmp};
-		cbc.encrypt(out, (const uint8_t*)Test::plaintext, i, true);
-		if( memcmp(tmp,Test::masters[i-1],out.size) != 0 ) {
-			log.fail("test_master/encrypt    :'%.*s'\n", i, Test::plaintext);
-			++res;
-		}
-		cbc.init(iv);
-		cbc.decrypt(memcpywrapper{tmp}, Test::masters[i-1], out.size);
-		if( memcmp(tmp,Test::plaintext,i) != 0 ) {
-			log.fail("test_master/decrypt    :'%.*s'\n", i, Test::plaintext);
 			++res;
 		}
 	}
@@ -418,9 +471,161 @@ const uint8_t* get_test_message() {
 	return (const uint8_t*) Test::plaintext;
 }
 
+static unsigned test_clocmaster(int i) {
+	uint8_t tmp[64];
+	unsigned res = 0;
+	memcpywrapper cout{tmp,0};
+	const uint8_t* msg = get_test_message();
+	crypto::chaskey::Chaskey8::Cloc cloc(get_test_vector(i));
+	cloc.update(msg + i%5, i, i >= 8);
+	if( i < 8 )
+		cloc.update(msg + i%5, 16 - i, true);
+	cloc.nonce(msg+i, i+3);
+	cloc.encrypt(cout, msg, i+8, i >= 8);
+	if( i < 8 )
+		cloc.encrypt(cout, msg + (i+8), i, true);
+	int size = cout.size;
+	cloc.write(cout);
+	int len = i+8+(i<8?i:0);
+	if( memcmp(tmp,Test::masters[i+63],cout.size) != 0 ) {
+		log.fail("test_master/cloc       :'%.*s'\n", len, msg);
+		log.block(level::error,"got                    :", tmp+(cout.size-16));
+		log.block(level::error,"expected               :", Test::masters[i+63]+(cout.size-16));
+		++res;
+	}
+	cloc.init();
+	cloc.update(msg + i%5, i, i >= 8);
+	if( i < 8 )
+		cloc.update(msg + i%5, 16 - i, true);
+	cloc.nonce(msg+i, i+3);
+	cout = {tmp, 0};
+	cloc.decrypt(cout, Test::masters[i+63], size, true);
+	const block_t & tag{ *(const block_t*)(Test::masters[i+63]+size)};
+	if( ! cloc.verify(tag) ) {
+		log.fail("test_master/verify     :'%.*s'\n", len, msg);
+		crypto::chaskey::Cipher8::Block got;
+		cloc.write(blockassignwrapper{got});
+		log.block(level::error,"got                    :", got);
+		log.block(level::error,"expected               :", tag);
+		++res;
+	}
+	if( memcmp(tmp, msg, len) != 0 ) {
+		log.fail("test_master/uncloc      :'%.*s'\n", len, msg);
+		log.error("got                    :\t'%.*s'\n", cout.size, tmp);
+		++res;
+	}
+
+	return res;
+}
+
+
+static unsigned test_cbcmaster(int i) {
+	unsigned res = 0;
+	uint8_t tmp[64];
+	crypto::chaskey::Cipher8::Cbc cbc;
+	cbc.set(Test::vectors[i]);
+	cbc.init(iv);
+	memcpywrapper out{tmp,0};
+	cbc.encrypt(out, (const uint8_t*)Test::plaintext, i, true);
+	if( memcmp(tmp,Test::masters[i-1],out.size) != 0 ) {
+		log.fail("test_master/encrypt    :'%.*s'\n", i, Test::plaintext);
+		++res;
+	}
+	cbc.init(iv);
+	cbc.decrypt(memcpywrapper{tmp,0}, Test::masters[i-1], out.size);
+	if( memcmp(tmp,Test::plaintext,i) != 0 ) {
+		log.fail( "test_master/decrypt    :'%.*s'\n", i, Test::plaintext);
+		log.error("got                    :\t'%.*s'\n", i, tmp);
+		++res;
+	}
+
+	return res;
+}
+
+/**
+ * test CBC adinst masters
+ */
+unsigned test_master() {
+	unsigned res = 0;
+	for(int i = 1; i < 64; ++i)
+		res += test_cbcmaster(i);
+	for(int i = 64; i < 80; ++i)
+		res += test_clocmaster(i-64);
+	return res;
+}
+
+static char nonce[] = "16  bytes  nonce";
+
+/**
+ * test CBC primitive encrypt/decrypt
+ */
+unsigned test_cloc(const block_t& v) {
+	unsigned res = 0;
+	crypto::chaskey::Cipher8::Cloc cloc;
+	uint8_t tmp[64];
+	uint8_t plain[64];
+	cloc.set(v);
+	for(auto i:  {7, 8, 9, 15, 16, 17, 31, 32, 33, 47, 48, 49, 50}) {
+		cloc.init();
+		cloc.update((const uint8_t*)(Test::plaintext + i%4), i, true);
+		cloc.nonce((const uint8_t*)nonce,sizeof(nonce));
+		memcpywrapper wrp{tmp,0};
+		cloc.encrypt(wrp, (const uint8_t*)Test::plaintext + i%6, i, true);
+		cloc.init();
+		cloc.update((const uint8_t*)(Test::plaintext + i%4), i, true);
+		cloc.nonce((const uint8_t*)nonce,sizeof(nonce));
+		cloc.decrypt(memcpywrapper{plain, 0}, tmp, i, true);
+		if( strncmp(Test::plaintext + i%6,(const char*)plain, i) != 0) {
+			log.fail( "test_cloc              :\t'%.*s'\n", i, Test::plaintext + i%6);
+			log.error("got                    :\t'%.*s'\n", i, plain);
+			++res;
+		}
+	}
+	return res;
+}
+
+/**
+ * test CBC primitive encrypt/decrypt
+ */
+unsigned test_clocchunk() {
+	unsigned adlen = 0, datalen = 0;
+	crypto::chaskey::Cipher8::Cloc cloc;
+	crypto::chaskey::Cipher8::Cloc verf;
+	const block_t& v(Test::vectors[0]);
+	uint8_t chunked[64];
+	uint8_t solid[64];
+	cloc.set(v);
+	verf.set(v);
+
+	uint8_t* ad = (uint8_t*)(Test::plaintext);
+	for(auto i: {12, 5, 15, 1, 14, 13}) {
+		cloc.update(ad, i, i == 13);
+		ad += i;
+		adlen += i;
+	}
+	cloc.nonce((uint8_t*)nonce, 7);
+	uint8_t* msg = (uint8_t*)(Test::plaintext);
+	memcpywrapper out{chunked,0};
+	for(auto i: {15, 17, 1, 14, 13}) {
+		cloc.encrypt(out, msg, i, i == 13);
+		msg += i;
+		datalen += i;
+	}
+	memcpywrapper vrf{solid,0};
+	verf.update((uint8_t*)(Test::plaintext), adlen, true);
+	verf.nonce((uint8_t*)nonce, 7);
+	verf.encrypt(vrf, (uint8_t*)(Test::plaintext), datalen, true);
+	if( memcmp(chunked, solid, vrf.size) ) {
+		log.fail( "test_clocchunk\n");
+		return 1;
+	}
+	return 0;
+}
+
 bool test_debug() {
 	return true;
 }
+
 
 bool test() {
 	if( ! test_debug() ) return false;
@@ -432,12 +637,15 @@ bool test() {
 		res += test_rolror(v);
 		res += test_transform(v);
 		res += test_cbc(v);
+		res += test_cloc(v);
 	}
 	log.info(".");
 	if( chaskey_cpp != &::chaskey )
 		res += test_head2head(Test::vectors[0]);
 	log.info(".");
 	res += test_mac(Test::vectors[0]);
+	log.info(".");
+	res += test_clocchunk();
 	log.info(".");
 	res += test_master();
 	if( res )
@@ -519,8 +727,8 @@ const block_t Test::vectors[64] =
   { 0x9047FAD7, 0x88136D8C, 0xA488286B, 0x7FE9352C }
 };
 
-/* echo '' > tests/master.inc; for i in `seq 1 63`; do
- * echo const uint8_t master$i[] = { `Debug/chaskey -T $i | file2c` }\; >> tests/master.inc; done;
+/* echo '' > tests/master.inc; for i in `seq 1 79`; do
+   echo const uint8_t master$i[] = { `Debug/chaskey -T $i | file2c` }\; >> tests/master.inc; done;
  */
 #include "master.inc"
 
@@ -532,5 +740,7 @@ const uint8_t * const Test::masters[] = {
 	master33,master34,master35,master36,master37,master38,master39,master40,
 	master41,master42,master43,master44,master45,master46,master47,master48,
 	master49,master50,master51,master52,master53,master54,master55,master56,
-	master57,master58,master59,master60,master61,master62,master63
+	master57,master58,master59,master60,master61,master62,master63,master64, 
+	master65,master66,master67,master68,master69,master70,master71,master72,
+	master73,master74,master75,master76,master77,master78,master79
 };

@@ -97,15 +97,24 @@ function ChaskeyTests() {
 	
 	this.demo = function() {
 		this.ui = {
-			key			: '#key',	
-			nonce		: '#nonce',	
-			message		: '#message',	
+			mode		: '#mode',
+			key			: '#key',
+			data		: '#data',
+			nonce		: '#nonce',
+			message		: '#message',
 			ciphertext	: '#ciphertext',
-			encrypt		: '#encrypt', 
-			decrypt		: '#decrypt', 
-			sign		: '#sign', 
-			format		: '#format'	
+			encrypt		: '#encrypt',
+			decrypt		: '#decrypt',
+			sign		: '#sign',
+			format		: '#format'
 		};
+		var validmodes = {
+			nonce		: ['CBC','CLOC'],
+			data		: ['CLOC'],
+			encrypt		: ['CBC','CLOC'],
+			decrypt		: ['CBC','CLOC'],
+			sign		: ['MAC','CLOC']
+		}
 		var ui = this.ui;
 		Object.keys(ui).every(function(id) {
 			ui[id] = document.querySelector(ui[id]);
@@ -115,19 +124,26 @@ function ChaskeyTests() {
 		backend.ui = ui;
 		
 		this.ui.encrypt.onclick = function() {
-			backend.encrypt();
+			backend.encrypt(ui.mode.value);
 		}
 		this.ui.decrypt.onclick = function() {
-			backend.decrypt();
+			backend.decrypt(ui.mode.value);
 		}
 		this.ui.sign.onclick = function() {
-			backend.sign();
+			backend.sign(ui.mode.value);
 		}
 		this.ui.format.onchange = function() {
 			backend.formatchange();
 		}
 		this.ui.ciphertext.onchange = function() {
 			this.format = null;
+		}
+		this.ui.mode.onchange = function() {
+			var value = this.value;
+			Object.keys(validmodes).every(function(id){
+				ui[id].disabled = validmodes[id].indexOf(value) < 0;
+				return true;
+			});
 		}
 		if( !this.ui.key.value ) {
 			generateRandomKey(function(key) {
@@ -177,13 +193,26 @@ function ChaskeyTests() {
 		
 	}
 
+	this.encryptCBC = function(text) {
+		var cbc = new ChaskeyCipher.Cbc();
+		cbc.set(this.readKey());
+		cbc.init(this.ui.nonce.value);
+		return cbc.encrypt(this.encoder.encode(this.ui.message.value));		
+	}
+
+	this.encryptCLOC = function(text) {
+		var cloc = new ChaskeyCipher.Cloc();
+		cloc.set(this.readKey());
+		cloc.update(this.ui.data.value);
+		cloc.nonce(this.ui.nonce.value);
+		return cloc.encrypt(text);
+	}
+
 	
-	this.encrypt = function() {
+	this.encrypt = function(mode) {
 		try{
-			var cbc = new ChaskeyCipher.Cbc();
-			cbc.set(this.readKey());
-			cbc.init(this.ui.nonce.value);
-			var cif = cbc.encrypt(this.encoder.encode(this.ui.message.value));
+			var text = this.encoder.encode(this.ui.message.value);
+			var cif = mode === 'CBC' ? this.encryptCBC(text) : this.encryptCLOC(text);
 			
 			if( this.ui.format.value === 'base-64' )
 				this.ui.ciphertext.value = btoa(String.fromCharCode.apply(null, cif));
@@ -197,11 +226,22 @@ function ChaskeyTests() {
 		}
 	}
 
-	this.decrypt = function() {
+	this.decryptCBC = function(cif) {
+		var cbc = new ChaskeyCipher.Cbc();
+		cbc.set(this.readKey());
+		cbc.init(this.ui.nonce.value);
+		return cbc.decrypt(cif);
+	}
+	this.decryptCLOC = function(cif) {
+		var cloc = new ChaskeyCipher.Cloc();
+		cloc.set(this.readKey());
+		cloc.update(this.ui.data.value);
+		cloc.nonce(this.ui.nonce.value);
+		return cloc.decrypt(cif);
+	}
+
+	this.decrypt = function(mode) {
 		try{
-			var cbc = new ChaskeyCipher.Cbc();
-			cbc.set(this.readKey());
-			cbc.init(this.ui.nonce.value);
 			
 			var format = this.ui.ciphertext.format || this.ui.format.value;
 			var cif;
@@ -210,20 +250,30 @@ function ChaskeyTests() {
 				cif = Uint8Array.from(atob(this.ui.ciphertext.value).split('').map(function (c) { return c.charCodeAt(0); }));
 			else
 				cif = bytes2string(this.ui.ciphertext.value);
-			
-			this.ui.message.value =  this.decoder.decode(cbc.decrypt(cif)).split(this.zero)[0];
+			var text = mode === 'CBC' ? this.decryptCBC(cif) : this.decryptCLOC(cif);
+			this.ui.message.value =  this.decoder.decode(text).split(this.zero)[0];
 		} catch(e) {
 			this.error('ERROR:',e.message)
 		}
-		
 	}
 
-	this.sign = function() {
+	this.signCLOC = function(text) {
+		var mac = new ChaskeyCipher.Mac();
+		mac.set(this.readKey());			
+		return mac.sign(this.encoder.encode(text));		
+	}
+
+	this.signMAC = function(text) {
+		var mac = new ChaskeyCipher.Mac();
+		mac.set(this.readKey());			
+		return mac.sign(this.encoder.encode(text));		
+	}
+
+	
+	this.sign = function(mode) {
 		try {
-			var mac = new ChaskeyCipher.Mac();
-			mac.set(this.readKey());			
-			var cif = mac.sign(this.encoder.encode(this.ui.message.value));
-			
+			var cif = mode === 'MAC' ? this.signMAC(this.ui.message.value) 
+									 : this.signCLOC(this.ui.message.value);
 			if( this.ui.format.value === 'base-64' )
 				this.ui.ciphertext.value = btoa(String.fromCharCode.apply(null, cif));
 			else
@@ -251,6 +301,10 @@ function ChaskeyTests() {
 			this.info('PASS :', 'test_CBC');
 		else
 			this.fail('FAIL :', 'test_CBC');
+		if( this.test_CLOC() )		
+			this.info('PASS :', 'test_CLOC');
+		else
+			this.fail('FAIL :', 'test_CLOC');
 	}
 		
 	this.test_MAC = function() {
@@ -273,7 +327,6 @@ function ChaskeyTests() {
 		}
 		return res;
 	}
-	
 	this.test_CBC = function() {
 		var res = true;
 		var cbc = new Cbc(new ChaskeyCipher(block32x4, 8));
@@ -285,7 +338,7 @@ function ChaskeyTests() {
 			var msg = plaintext.subarray(0,i);
 			var cif = cbc.encrypt(msg);
 			if( ! compare(cif, this.masters[i-1]) ) {
-				this.error("error: test_CBC/encrypt:",this.plaintext.substr(0,i));
+				this.error("error: test_CBC/encrypt: ",this.plaintext.substr(0,i));
 				this.debug("got                    : ", bytes2hex(cif));
 				this.debug("expected               : ", bytes2hex(this.masters[i-1]));
 				res = false;
@@ -293,7 +346,7 @@ function ChaskeyTests() {
 			cbc.initIV([0,0,0,0]);
 			var txt = cbc.decrypt(cif);
 			if( ! compare(txt, msg, i) ) {
-				this.error("error: test_CBC/decrypt:",  this.plaintext.substr(0,i));
+				this.error("error: test_CBC/decrypt: ",  this.plaintext.substr(0,i));
 				this.debug("got                    : ", bytes2hex(txt));
 				this.debug("expected               : ", bytes2hex(msg));
 				res = false;
@@ -301,6 +354,98 @@ function ChaskeyTests() {
 		}
 		return res;
 	}
+	var nonce = "16  bytes  nonce";
+	thiz = this;
+	
+	function test_cloc() {
+		var res = true;
+		var cloc = new Cloc(new ChaskeyCipher(block32x4, 8));
+		var plaintext = string2bytes(thiz.plaintext);
+		patch4IE(plaintext);
+		var list = [7, 8, 9, 15, 16, 17, 31, 32, 33, 47, 48, 49, 50];
+		for(var j in list) {
+			var i = list[j];
+			cloc.set(thiz.vectors[0]);
+			cloc.update(plaintext.subarray(i%4,i+i%4), true);
+			cloc.nonce(nonce);
+			var msg = plaintext.subarray(i%6,i+i%6);
+			var cif = cloc.encrypt(msg, true);
+			cloc.init();
+			cloc.update(plaintext.subarray(i%4,i+i%4), true);
+			cloc.nonce(nonce);
+			var txt = cloc.decrypt(cif, true);
+			if( ! compare(txt, msg, i) ) {
+				thiz.error("error:test_CLOC/decrypt: ", thiz.plaintext.substr(0,i));
+				thiz.debug("got                    : ", bytes2hex(txt));
+				thiz.debug("expected               : ", bytes2hex(msg));
+				res = false;
+			}
+		}
+		return res;		
+	}
+
+	function test_clocchunk() {
+		var res = true;
+		var cloc = new Cloc(new ChaskeyCipher(block32x4, 8));
+		var verf = new Cloc(new ChaskeyCipher(block32x4, 8));
+		var plaintext = string2bytes(thiz.plaintext);
+		patch4IE(plaintext);
+		var msglist = [15, 17, 1, 14, 13];
+		cloc.set(thiz.vectors[0]);
+		cloc.update(plaintext.subarray(0,18));
+		cloc.nonce(nonce.substring(0,6));
+		var out;
+		var datalen = 0;
+		for(var j in msglist) {
+			var i = msglist[j];
+			out = cloc.encrypt(plaintext.subarray(datalen, datalen+i), i == 13);			
+			datalen += i;
+		}
+		verf.set(thiz.vectors[0]);
+		verf.update(plaintext.subarray(0,18));
+		verf.nonce(nonce.substring(0,6));
+		var vrf = verf.encrypt(plaintext.subarray(0,datalen), true);
+		if( ! compare(out, vrf, datalen) ) {
+			thiz.error("error:test_CLOC/chunk  : ",  thiz.plaintext.substr(0,datalen));
+			thiz.debug("got                    : ", bytes2hex(out));
+			thiz.debug("expected               : ", bytes2hex(vrf));
+			return false;
+		}
+		return true;
+	}
+
+	function test_clocmaster() {
+		var res = true;
+		var cloc = new Cloc(new ChaskeyCipher(block32x4, 8));
+		var msg = string2bytes(thiz.plaintext);
+		patch4IE(msg);
+		for(var i = 0; i < 16; ++i) {
+			cloc.set(thiz.vectors[i]);
+			cloc.update(msg.subarray(i%5,i+i%5), i>=8);
+			if( i < 8 )
+				cloc.update(msg.subarray(i%5,16-i+i%5), true);
+			cloc.nonce(msg.subarray(i,i+i+3));
+			var out = cloc.encrypt(msg.subarray(0, i+8, i >= 8));
+			if( i < 8 )
+				out = cloc.encrypt(msg.subarray(i+8, i+i+8), true);
+			var tmp = new Formatter(16);
+			var len = i+8+(i<8?i:0);			
+			tmp.append(out);
+			tmp.append(cloc.mac());
+			if( ! compare(tmp, thiz.masters[i+63], thiz.masters[i+63].length) ) {
+				thiz.error("error:test_CLOC/master : ", thiz.plaintext.substr(0,len));
+				thiz.debug("got                    : ", bytes2hex(tmp));
+				thiz.debug("expected               : ", thiz.masters[i+63]);
+				res = false;
+			}
+		}
+		return res;
+	}
+	
+	this.test_CLOC = function() {
+		return !!(test_clocmaster() & test_cloc() & test_clocchunk()); 
+	}
+	
 	
 	this.fail = function() {
 		console.log(Array.from(arguments).join(''));
@@ -456,15 +601,22 @@ function ChaskeyTests() {
 		[ 99,45,35,44,153,237,60,32,122,156,158,17,225,48,53,103,117,46,94,91,200, 93,249,48,206,3,49,171,145,121,194,237,55,137,190,21,200,179,79,196,36, 24,114,252,203,99,187,180,235,139,174,154,64,206,219,5,87,11,209,203,254, 149,196,110 ],
 		[ 225,41,74,127,96,108,234,255,19,129,178,139,43,244,113,146,94,129,129,151, 162,53,237,55,166,238,103,141,215,190,234,142,213,53,110,62,155,188,217, 187,39,234,214,239,115,53,194,98,211,4,95,17,17,213,8,199,12,171,162,172, 211,68,203,177 ],
 		[ 133,100,189,25,253,43,51,103,6,1,99,156,196,62,72,216,144,23,214,84,223, 186,74,6,188,98,149,157,80,31,35,94,34,126,251,237,93,139,167,89,214,81, 30,116,203,109,6,84,53,239,29,119,201,20,195,143,161,81,55,14,75,20,212, 97 ],
-		[ 161,27,115,145,250,123,188,180,210,181,75,188,168,100,241,180,63,59,107, 97,45,130,179,244,244,236,131,108,31,3,180,168,187,141,72,135,252,234,134, 154,82,190,151,129,147,249,243,134,184,30,87,184,75,232,141,66,207,0,133, 53,15,51,67,212 ],		
-	];
-}
-
-/** patching IE 																*/ 
-if( ! Array.from ) {
-	Array.from = function(src) {
-		var dst = new Array(src.length);
-		dst.every(function(v,i) { dst[i] = src[i]; return true; });
-		return dst;
-	}
+		[ 161,27,115,145,250,123,188,180,210,181,75,188,168,100,241,180,63,59,107, 97,45,130,179,244,244,236,131,108,31,3,180,168,187,141,72,135,252,234,134, 154,82,190,151,129,147,249,243,134,184,30,87,184,75,232,141,66,207,0,133, 53,15,51,67,212 ],
+		[ 101,160,120,89,138,55,143,101,149,250,239,152,122,121,84,36,214,3,120,13, 136,24,77,150 ],
+		[ 203,174,244,74,38,46,117,60,68,66,72,177,59,67,128,132,145,155,75,155,158, 184,152,248,112,114 ],
+		[ 174,186,45,36,166,134,195,43,166,108,76,55,245,5,165,205,26,117,120,118, 91,84,128,109,248,65,3,96 ],
+		[ 166,192,210,132,109,61,0,253,174,98,153,105,16,224,193,146,94,252,231,155, 12,117,68,168,16,79,193,74,238,98 ],
+		[ 204,231,166,234,4,44,45,128,31,41,88,61,211,74,103,23,115,20,240,79,191, 85,176,28,201,232,251,73,118,217,238,47 ],
+		[ 14,209,202,119,79,43,96,216,89,90,223,163,37,248,28,168,129,187,100,114, 72,199,168,20,109,194,49,72,48,185,97,120,41,82 ],
+		[ 228,190,242,61,252,95,94,21,207,75,6,8,131,254,215,92,34,180,100,2,59,79, 70,67,85,190,230,161,70,182,219,114,103,239,104,19 ],
+		[ 166,69,162,214,21,198,15,56,236,125,233,198,240,135,76,81,80,9,126,200, 209,190,28,55,165,230,72,5,187,49,171,199,189,83,43,183,171,165 ],
+		[ 177,104,86,135,228,33,176,89,104,110,111,15,240,197,48,207,123,81,89,55, 116,150,14,68,146,182,12,108,211,32,144,183 ],
+		[ 3,23,173,220,246,1,189,8,243,33,118,204,157,144,69,12,155,20,149,55,254, 9,10,48,19,130,156,28,32,213,178,103,173 ],
+		[ 44,194,119,220,37,79,65,47,132,215,159,182,87,94,165,188,26,73,227,116, 226,189,48,4,226,71,125,220,25,11,181,221,232,32 ],
+		[ 154,166,121,23,155,28,43,106,215,235,89,109,245,7,235,90,161,140,15,100, 64,2,35,58,45,49,203,157,132,42,19,86,11,180,248 ],
+		[ 190,26,115,144,206,183,93,13,47,174,150,237,36,71,248,202,42,23,154,31, 212,8,111,199,18,75,138,153,168,207,225,232,212,197,242,234 ],
+		[ 7,183,194,218,57,173,45,230,80,11,30,194,44,209,179,93,113,191,126,147, 117,174,4,4,174,98,246,59,74,120,233,65,176,39,0,220,234 ],
+		[ 204,109,168,196,153,13,43,138,85,164,29,155,94,196,219,10,1,0,204,253,87, 227,228,104,77,42,45,139,116,82,100,110,250,30,225,12,157,244 ],
+		[ 158,101,171,59,253,115,222,45,156,1,116,105,156,8,247,63,131,52,177,40, 52,245,6,115,127,73,142,76,223,215,11,151,73,84,164,13,205,213,51 ]
+		];
 }

@@ -5,7 +5,7 @@ MEMORY
   dport0_0_seg :                        org = 0x3FF00000, len = 0x10
   dram0_0_seg :                         org = 0x3FFE8000, len = 0x14000
   iram1_0_seg :                         org = 0x40100000, len = 0x8000
-  irom0_0_seg :                         org = 0x40240000, len = 0x3C000
+  irom0_0_seg :                         org = 0x40210000, len = 0x80000
 }
 
 PHDRS
@@ -85,6 +85,9 @@ SECTIONS
     *(.sdata2.*)
     *(.gnu.linkonce.s2.*)
     *(.jcr)
+    _persistent_start = ABSOLUTE(.);
+    *(.persistent)
+    _persistent_end = ABSOLUTE(.);
     _data_end = ABSOLUTE(.);
   } >dram0_0_seg :dram0_0_phdr
 
@@ -199,6 +202,9 @@ SECTIONS
     *(.lit4.*)
     *(.gnu.linkonce.lit4.*)
     _lit4_end = ABSOLUTE(.);
+    . = ALIGN(4096);
+    _irom0_user_start = ABSOLUTE(.);
+    KEEP(*(.irom0.user))
   } >iram1_0_seg :iram1_0_phdr
 
   .irom0.text : ALIGN(4)
@@ -207,7 +213,7 @@ SECTIONS
     *(.irom0.literal .irom.literal .irom.text.literal .irom0.text .irom.text)
     *(.literal.* .text.*)
     _irom0_text_end = ABSOLUTE(.);
-  } >irom0_0_seg :irom0_0_phdr
+  } >irom0_0_seg :irom0_0_phdr  
 }
 
 /* get ROM code address */

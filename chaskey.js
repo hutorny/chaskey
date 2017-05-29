@@ -33,8 +33,15 @@ function block32x4(a) {
 	this.xor = function(blk) {
 		for(var i in this.v) {  this.v[i] ^= (blk.v||blk)[i]; }
 	}
+	this.xor_bytes = function(blk, size) {
+		var v = new Uint8Array(this.v.buffer);		
+		var b = blk.v 
+			? new Uint8Array(blk.v.buffer, blk.v.byteOffset)
+			: new Uint8Array(blk.buffer, blk.byteOffset);
+		for(var i = 0; i<size; ++i) {  v[i] ^= b[i]; }
+	}
 	this.raw = function() {
-		return Uint8Array.from(v.buffer);
+		return Uint8Array.from(this.v.buffer);
 	}
 	this.assign = function(b) {
 		var v = new DataView(b);		
@@ -125,10 +132,8 @@ function block32x4(a) {
 	this.init = function(key) {
 		this.assign(key);
 	}
-	this.cast = function(block) {
-		var res = new ChaskeyCipher(this.block_t, this.N);
-		res.v
-		return res;
+	this.clone = function() {
+		return new ChaskeyCipher(this.block_t, N);
 	}
 };
 
@@ -182,8 +187,11 @@ function Formatter(n) {
 	
 	
 	this.append = function(message) {
-		if( typeof(message) === typeof("") || message instanceof String ) try {
-			message = new TextEncoder("utf-8").encode(message);
+		if( typeof(message) === typeof("") || message instanceof String) try {
+			if( window.TextEncoder )
+				message = new TextEncoder("utf-8").encode(message);
+			else
+				message = utf8ToBuffer(message);
 		} catch(e) { 
 			console.log(e);
 			message = utf8ToBuffer(message);
@@ -215,14 +223,20 @@ function Formatter(n) {
 		return (pos += N) < bytes.length;		
 	}	
 	this.move = function(data) {
-		bytes.set(new Uint8Array(data.buffer), pos);
+		data && this.save(data);
 		return (pos += N) < bytes.length;		
 	}
-	this.full = function() {
-		return pos + N <= bytes.length;
+	this.save = function(data) {
+		bytes.set(new Uint8Array(data.buffer), pos);
 	}
-	this.bytes = function() {
-		return Uint8Array.from(bytes.subarray(0,pos));
+	this.full = function() {
+		return pos + N <= len;
+	}
+	this.bytes = function(l) {
+		return Uint8Array.from(bytes.subarray(0,l||len));
+	}
+	this.len = function() {
+		return len;
 	}
 }
 
@@ -246,7 +260,7 @@ function Mac(cipher, formatter) {
 	}
 	function encrypt(block) {
 		cipher.xor(block);
-		cipher.permute(block);
+		cipher.permute();
 	}
 	this.sign = function(message) {
 		if( key === null ) throw new Error("key is not set");
@@ -278,7 +292,7 @@ function Cbc(cipher, formatter) {
 	}
 	function encrypt(block) {
 		cipher.xor(block);
-		cipher.permute(block);
+		cipher.permute();
 		cipher.xor(key);
 	}	
 	function decrypt(input) {
@@ -329,6 +343,184 @@ function Cbc(cipher, formatter) {
 	}
 }
 
+/**
+ * Constructs a Cloc crypto primitive 
+ */
+function Cloc(Cipher, formatter) {
+	var key = null;
+	var ozp = false;	
+	var g1g2guard = false;
+	var buff = formatter || new Formatter(Cipher.size);
+	formatter && formatter.init(Cipher.size);
+	var enc = Cipher;
+	var tag = Cipher.clone();
+	
+	function asHex(b) {
+		b = Array.from(b.v || b);
+		return '[' + b.map(function(i){ return i.toString(16); }).join(",") + ']';
+	} 
+
+	function cipher(input) {
+		if( input ) tag.xor(input);
+		tag.permute();
+		tag.xor(key);
+	}
+	
+	function prf(tailsize, block) {
+		block && enc.assign(block);
+		cipher(enc);
+		fix1(enc.block());
+		enc.permute();
+		tailsize == enc.size ? enc.xor(key) : enc.xor_bytes(key, tailsize);
+	}
+	
+	/* CLOC-specific tweak function, 										*/
+	/** f1(X) = (X[1, 3],X[2, 4],X[1, 2, 3],X[2, 3, 4])						*/
+	function f1(b) {
+		b[0]  ^= b[2];			/* X[1, 3]									*/
+		var  t = b[1];
+		b[1]  ^= b[3];			/* X[2, 4]									*/
+		b[3]   = b[2] ^ b[1];	/* X[2, 3, 4]								*/
+		b[2]   = b[0] ^ t;		/* X[1, 2, 3]								*/
+	}
+	/** f2(X) = (X[2],X[3],X[4],X[1, 2])									*/
+	function f2(b) {
+		var  t = b[0] ^ b[1];
+		b[0]   = b[1];			/* X[2]										*/
+		b[1]   = b[2];			/* X[2]										*/
+		b[2]   = b[3];			/* X[4]										*/
+		b[3]   = t;				/* X[1, 2]									*/
+	}
+	/** g1(X) = (X[3],X[4],X[1, 2],X[2, 3])									*/
+	function g1(b) {
+		var t  = b[0];
+		b[0]   = b[2];			/* X[3]										*/
+		b[2]   = b[1] ^ t;		/* X[1, 2]									*/
+		t      = b[1];
+		b[1]   = b[3];			/* X[4]										*/
+		b[3]   = b[0] ^ t;		/* X[2, 3]									*/
+	}
+	/** g2(X) = (X[2],X[3],X[4],X[1, 2])									*/
+	function g2(b) { f2(b); }
+	/** h(X) = (X[1, 2],X[2, 3],X[3, 4],X[1, 2, 4]) 						*/
+	function h(b) {
+		b[0] ^= b[1]; 			/* X[1, 2]									*/
+		b[1] ^= b[2];			/* X[2, 3]									*/
+		b[2] ^= b[3];			/* X[3, 4]									*/
+		b[3] ^= b[0];			/* X[1, 2, 4]								*/
+	}
+	function fix0(b) {
+		var fixed = b[0] & 0x80000000;
+		b[0] &= ~ 0x80000000;
+		return !! fixed;
+	}
+	function fix1(b) {
+		b[0] |= 0x80000000;
+	}
+	
+	
+	this.init = function() {
+		ozp = false;	
+		g1g2guard = false;
+		enc.init(key);
+		buff.reset();				
+	}
+	
+	this.set = function(akey) {
+		key = new enc.block_t(akey);
+		this.init();
+	}
+	function update(block) {
+		enc.xor(block);
+		enc.permute();
+		enc.xor(key);
+	}	
+
+	function process(block, tailsize, empty) {
+		if( ! g1g2guard ) {
+			if( empty ) g1(tag.block());
+			else g2(tag.block());
+			g1g2guard = true;
+		}
+		cipher();
+		tailsize == enc.size ? enc.xor(block) : enc.xor_bytes(block, tailsize);
+	}
+	/** processes associated data  											*/
+	this.update = function(message) {
+		if( key === null ) throw new Error("key is not set");
+		var fixed0 = false;
+		buff.append(message);
+		ozp = buff.pad(0x80);
+		do {
+			if( buff.last() ) fixed0 = fix0(enc.block());			
+			update(buff.block());
+			if( fixed0 ) h(enc.block());
+		} while(buff.next());
+		buff.reset();
+	}
+
+	/** applies a nonce														*/
+	this.nonce = function(nonce) {
+		if( key === null ) throw new Error("key is not set");		
+		buff.append(nonce);
+		buff.pad(0x80);
+		enc.xor(buff.block());
+		if( ozp ) f2(enc.block());
+		else f1(enc.block());
+		tag.assign(enc.block());
+		enc.permute();
+		enc.xor(key);
+		buff.reset();
+	}
+	
+	/** encrypts a chunk of data 											*/	
+	this.encrypt = function(message, last) {
+		if( key === null ) throw new Error("key is not set");		
+		buff.append(message);
+		last = ( last !== false );
+		var len = buff.len();
+		var tailsize = enc.size;
+		if( last ) { 
+			tailsize = (buff.len() % enc.size) || enc.size;
+			buff.pad(0);
+		}
+		while( buff.full() ) {
+			var tail = buff.last() ? tailsize : enc.size;
+			process(buff.block(), tail, last && len == 0);
+			buff.save(enc.block());
+			prf(tail);
+			buff.move();
+		}
+		return buff.bytes(len);
+	}
+	
+	/** decrypts a chunk of data 											*/	
+	this.decrypt = function(message, last) {		
+		if( key === null ) throw new Error("key is not set");		
+		buff.append(message);		
+		last = ( last !== false );
+		var len = buff.len();
+		var tailsize = enc.size;
+		if( last ) { 
+			tailsize = (buff.len() % enc.size) || enc.size;
+			buff.pad(0);
+		}
+		while( buff.full() ) {
+			var input = Uint32Array.from(buff.block());
+			var tail = buff.last() ? tailsize : enc.size;
+			process(buff.block(), tail, last && len == 0);
+			buff.move(enc.block());
+			prf(tail, input);
+		}
+		return buff.bytes(len);
+	}
+	
+	/** returns digest (MAC) chunk of data 									*/	
+	this.mac = function() {
+		return tag.raw();
+	}
+}
+
 /** ChaskeyCipher.Mac - a predefined primitive MAC using ChaskeyCipher */
 ChaskeyCipher.Mac = function(count) {
 	Mac.call(this, new ChaskeyCipher(block32x4, count||8));
@@ -339,18 +531,21 @@ ChaskeyCipher.Cbc = function(count) {
 	Cbc.call(this, new ChaskeyCipher(block32x4, count||8));
 }
 
+ChaskeyCipher.Cloc = function(count) {
+	Cloc.call(this, new ChaskeyCipher(block32x4, count||8));
+}
 
 /** patching IE 																*/ 
 if( ! Uint32Array.from ) {
 	Uint32Array.from = function(src) {
-		var dst = new Uint32Array(src.length);
+		var dst = new Uint32Array(src.length||0);
 		Array.prototype.every.call(dst, function(v,i) { dst[i] = src[i]; return true; });
 		return dst;
 	}
 }
 if( ! Uint8Array.from ) {
 	Uint8Array.from = function(src) {
-		var dst = new Uint8Array(src.length);
+		var dst = new Uint8Array(src.length||0);
 		Array.prototype.every.call(dst, function(v,i) { dst[i] = src[i]; return true; });
 		return dst;
 		
@@ -360,6 +555,14 @@ if( ! Uint8Array.prototype.fill ) {
 	Uint8Array.prototype.fill = function(val) {
 		Array.prototype.every.call(this, function(v,i) { this[i] = val; return true; });
 	}	
+}
+
+if( ! Array.from ) {
+	Array.from = function(src) {
+		var dst = new Array(src.length);
+		dst.every(function(v,i) { dst[i] = src[i]; return true; });
+		return dst;
+	}
 }
 
 function patch4IE(obj) {

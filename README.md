@@ -9,7 +9,8 @@ Design of both C++ and JavaScript versions follows high-granular decomposition o
 * Formatter – formats input string of bits as blocks, either buffering them or with zero-copy direct access
 * Cipher – implements forward and reverse transformations of the underlying block
 * Cbc – Cipher Block Chaining mode of operation 
-* Mac – Message Authentication mode of operation 
+* Mac – Message Authentication mode of operation
+* Cloc – Confidentiality and Authentication mode of operation, see https://eprint.iacr.org/2014/157.pdf
 
 In C++ primitives are implemented as templates, so that a cipher instance ultimately appears as  `Cbc<Cipher<N>,Formatter>` or `Mac<Cipher<N>,Formatter>`, where N is a number of transformation rounds, set equal to 8 in Chaskey8 class.<br>
 In JavaScript same primitives are  implemented as objects . Online demo is available on http://hutorny.in.ua/chaskey/
@@ -41,6 +42,15 @@ while(in) {
 	cbc.encrypt(out, (const uint8_t*)msg, len, in.eof());	// and encrypt or
 	//cbc.encrypt(out, (const uint8_t*)msg, len, in.eof());	// decrypt data
 }
+
+crypto::chaskey::Cipher8::Cloc cloc;	// instantiate a cipher in CLOC mode
+cloc.set(key);							// set the key
+cloc.init(); 							// inity before  reusing instance
+cloc.update(ad, length, false);			// feed AD by chunks
+cloc.update(ad, length, true); 			// feed last AD chunk
+cloc.nonce(nonce, length);				// apply noce
+cloc.encrypt(out, datachunk, false);	// feed data by chunks
+cloc.encrypt(out, lastdatachunk, true);	// feed last data chunk
 ``` 
 
  
@@ -61,29 +71,42 @@ var cif = cbc.encrypt(message);		// encrypt the message
 
 Table below lists benchmarking results for 1M operations on a 32-bytes-long message.
 
-|    Mach    | F, MHz|  Core    |   Arh     | Ref.MAC | Cpp MAC |  MAC    | Encrypt | Decrypt |
-|------------|------:|:--------:|-----------|--------:|--------:|--------:|--------:|--------:|
-|i586        | 3,400 |   i586   | x86_32    |      57 |      57 |      52 |      47 |      53 |
-|Linkit Smart|   580 | MT7688   | MIPS 32 le|     990 |     890 |     930 |     860 |     960 |
-|Carambola2  |   400 | AR9331   | MIPS 32 be|-- N/A --|   1,730 |    1750 |   2,670 |   2,820 |
-|Photon      |   120 | STM32F   | ARM 32    |   3,176 |   2,441 |   2,455 |   2,154 |   3,051 |
-|Teensy3     |    72 | MK20DX   | ARM 32    |   6,513 |   5,053 |   4,886 |   4,384 |   6,849 |
-|NodeMCU<sup>*</sup>|80| LX106  | RISC 32   |-- N/A --|   8,490 |   9,310 |  11,590 |  10,930 |
-|MSP430<sup>*</sup>|     8 | MSP430   | CISC 16   |-- N/A --| 431,000 | 398,000 | 388,000 | 577,000 |
-|Arduino Mega<sup>*</sup>|8 |ATmega2560|AVR 8|763,000 | 744,000 | 746,000 | 740,000 | 822,000 |
+|    Mach    | F, MHz|  Core    |   Arh     | Ref.MAC | ChaCha8 | Cpp MAC |  MAC    | Encrypt | Decrypt |aes128cloc|  CLOC  | 
+|------------|------:|:--------:|-----------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:| 
+|i586        | 3,400 |   i586   | x86_32    |      59 |     137 |      59 |      57 |      55 |      67 |     863 |     155 | 
+|Linkit Smart|   580 | MT7688   | MIPS 32 le|   1,020 |   1,710 |     890 |     930 |     880 |     960 |  13,600 |   3,040 | 
+|Carambola2  |   400 | AR9331   | MIPS 32 be|-- N/A --|   2,500 |   1,730 |    1750 |   2,700 |   2,850 |  19,740 |   7,500 | 
+|Photon      |   120 | STM32F   | ARM  32   |   3,176 |   8,780 |   2,451 |   2,395 |   2,184 |   2,941 |-- N/A --|   7,507 | 
+|Teensy3     |    72 | MK20DX   | ARM  32   |   6,390 |  12,926 |   5,220 |   5,346 |   5,054 |   6,055 | 193,700 |  15,450 | 
+|NodeMCU<sup>*</sup>|80| LX106  | RISC 32   |-- N/A --|  12,500 |   8,570 |   7,670 |  12,200 |  12,000 |-- N/A --|  31,300 | 
+|MSP430<sup>*</sup>| 8 | MSP430 | CISC 16   |-- N/A --|-- N/A --| 431,000 | 398,000 | 388,000 | 577,000 |-- N/A --|-- N/A --| 
+|Arduino Mega<sup>*</sup>|8 |ATmega2560|AVR 8|764,000 | 270,000 | 900,000 | 752,000 | 738,000 | 827,000 |-- N/A --|2,610,000| 
 
 Values are give in ms, All binaries were compiled with gcc option `-O3` -- Optimize most.<br> 
 <sup>*</sup>NodeMCU, MSP430 and Arduino Mega results are extrapolated from tests with 100K operations
 
 Next table shows same results in normilized form - clock cycles per one operation
 
-|    Mach    | F, MHz|  Core    |   Arh     | Ref.MAC | Cpp MAC |   MAC   | Encrypt | Decrypt |
-|------------|------:|:--------:|-----------|--------:|--------:|--------:|--------:|--------:|
-|i586        | 3,400 |   i586   | x86_32    |   194   |   194   |   177   |    160  |   180   |
-|Linkit Smart|   580 | MT7688   | MIPS 32 le|   574   |   516   |   539   |    499  |   557   |
-|Carambola2  |   400 | AR9331   | MIPS 32 be|-- N/A --|   692   |   700   |   1068  |  1128   |
-|Photon      |   120 | STM32F   | ARM 32    |   381   |   293   |   295   |    258  |   366   |
-|Teensy3     |    72 | MK20DX   | ARM 32    |   469   |   364   |   352   |    316  |   493   |
-|NodeMCU     |    80 | LX106    | RISC 32   |-- N/A --|   679   |   745   |    927  |   874   |
-|MSP430      |     8 | MSP430   | CISC 16   |-- N/A --|  3448   |  3184   |   3104  |  4616   |
-|Arduino Mega|     8 |ATmega2560| AVR 8     |  6104   |  5952   |  5968   |   5920  |  6576   |
+|    Mach    | F, MHz|  Core    |   Arh     | Ref. MAC| ChaCha8 | Cpp MAC |  MAC    | Encrypt | Decrypt |aes128cloc|  CLOC  |
+|------------|------:|:--------:|-----------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:|
+|i586        | 3,400 |   i586   | x86_32    |   201   |   466   |   201   |   194   |   187   |   228   |  2934   |   527   |
+|Linkit Smart|   580 | MT7688   | MIPS 32 le|   592   |   992   |   516   |   539   |   510   |   557   |  7888   |  1763   |
+|Carambola2  |   400 | AR9331   | MIPS 32 be|-- N/A --|  1000   |   692   |   700   |  1080   |  1140   |  7896   |  3000   |
+|Photon      |   120 | STM32F   | ARM 32    |   381   |  1054   |   294   |   287   |   262   |   353   |-- N/A --|   901   |
+|Teensy3     |    72 | MK20DX   | ARM 32    |   460   |   931   |   376   |   385   |   364   |   436   | 13946   |  1112   |
+|NodeMCU     |    80 | LX106    | RISC 32   |-- N/A --|  1000   |   686   |   614   |   976   |   960   |-- N/A --|  2504   |
+|MSP430      |     8 | MSP430   | CISC 16   |-- N/A --|-- N/A --|  3448   |  3184   |  3104   |  4616   |-- N/A --|-- N/A --|
+|Arduino Mega|     8 |ATmega2560| AVR 8     |  6112   |  2160   |  7200   |  6016   |  5904   |  6616   |-- N/A --| 20880   |
+
+
+State size, including the key, dervied keys and formatter's buffer, bytes:
+
+|    Mach    |   Arh     |   MAC   |   CBC   |  CLOC   |
+|------------|-----------|--------:|--------:|--------:|
+|i586        | x86_32    |    92   |     60  |    80   |
+|Linkit Smart| MIPS 32 le|    92   |     60  |    80   |
+|Carambola2  | MIPS 32 be|    84   |     52  |    72   |
+|Photon      | ARM 32    |    92   |     60  |    80   |
+|Teensy3     | ARM 32    |    92   |     60  |    80   |
+|NodeMCU     | RISC 32   |    84   |     52  |    72   |
+|Arduino Mega| AVR 8     |    84   |     52  |    72   |

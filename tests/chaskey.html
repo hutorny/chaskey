@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>Crypto Probe</title>
+<title>Chaskey Cipher Demo</title>
 <link rel="stylesheet" href="/r/css/responsive.css">
 <script type="text/javascript" src="../chaskey.js"></script>
 <script type="text/javascript" src="chaskey_test.js"></script>
@@ -14,6 +14,10 @@ body {
 
 *:focus {
     outline: none;
+}
+
+select {
+	padding: .3em .4em .15em;
 }
 
 input:focus {
@@ -109,25 +113,39 @@ fieldset {
 	margin-right:auto;
 }
 
-#key-nonce > span > label {
+#mode-key {
+	margin-bottom: 0.5em;
+}
+#data-nonce > span > label,
+#mode-key > span > label {
 	width: 3.5em;
 }
-
-#key-nonce > span:first-child > label {
+#data-nonce > span:first-child > label,
+#mode-key > span:first-child > label {
 	margin-right: 0.5em;
 }
 
-#key-nonce > span:last-child > input {
+#data-nonce > span:last-child > input,
+#mode-key > span:last-child > input {
 	width: calc(100% - 1em);
 }
 
-
-#key-nonce > span {
+#data-nonce > span,
+#mode-key > span {
 	text-align: right;
 }
 
-#key-nonce > span > input {
+#data-nonce > span > input,
+#mode-key > span > input {
 	width: calc(100% - 5.3em);
+}
+
+#mode-key > span > select {
+	width: calc(100% - 4.4em);
+}
+
+#mode-key > span > select {
+	vertical-align: top;
 }
 
 button#sign:after,
@@ -167,17 +185,30 @@ button#decrypt:before {
 <body>
 <div id="content">
 <p>This page provides testing and demonstration facilities for 
-<a href="http://mouha.be/chaskey/">Chaskey  Cipher algorithm</a> in 
-<a href="http://csrc.nist.gov/groups/ST/toolkit/BCM/current_modes.html">
-MAC and CBC modes</a>
+<a href="http://mouha.be/chaskey/" target=_blank>Chaskey  Cipher algorithm</a> in 
+<a href="http://csrc.nist.gov/groups/ST/toolkit/BCM/current_modes.html" target=_blank>
+MAC, CBC</a> and
+<a href="https://eprint.iacr.org/2014/157.pdf"  target=_blank>
+CLOC</a> modes
 <fieldset>
 	<legend>
-		<label>Chaskey  Cipher Demo</label>
+		<label>Chaskey Cipher Demo</label>
 	</legend>
-	<div id="key-nonce">
-		<span class="table-cell"><label>Key</label><input id="key" placeholder="Enter a key"></span>		
+	<div id="mode-key">
+		<span class="table-cell"><label>Mode</label>
+			<select id="mode">
+			<option value="MAC">MAC</option>
+			<option value="CBC">CBC</option>
+			<option value="CLOC">CLOC</option>
+			</select>
+		</span>
+		<span class="table-cell narrow"><label>Key</label></span>
+		<span class="table-cell"><input id="key" placeholder="Enter a key"></span>
+	</div>
+	<div id="data-nonce">
+		<span class="table-cell"><label>Data</label><input id="data" disabled=disabled placeholder="Enter associated data"></span>
 		<span class="table-cell narrow"><label>Nonce</label></span>
-		<span class="table-cell"><input id="nonce" placeholder="Enter a nonce"></span>
+		<span class="table-cell"><input id="nonce" disabled=disabled placeholder="Enter a nonce"></span>
 	</div>
 	<div class="table-cell">
 		<label>Message</label>
@@ -192,8 +223,8 @@ MAC and CBC modes</a>
 			</select>
 		</div>
 		<div class="actions">
-			<button id="encrypt">Encrypt</button>
-			<button id="decrypt">Decrypt</button>
+			<button id="encrypt" disabled=disabled>Encrypt</button>
+			<button id="decrypt" disabled=disabled>Decrypt</button>
 			<button id="sign">Sign</button>
 		</div>
 	</div>
@@ -206,16 +237,11 @@ MAC and CBC modes</a>
 <div id="copyright">Copyright &copy; 2017 Eugene Hutorny <span id="copyright-email">@</span></div>
 <hr>
 <script type="text/javascript">
-/* conver array buffer to base64
-btoa(String.fromCharCode.apply(null, new Uint8Array(buffer))); 
- */
-//try { 
+//try {  
 	var test = new ChaskeyTests();
 	test.run();
-	test.demo();
-try{
-	
-}
+	test.demo();	
+try { }
 catch(e) { 
 	var div = document.createElement('div');
 	div.setAttribute('class','fatal');

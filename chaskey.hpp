@@ -26,15 +26,17 @@
 
 #pragma once
 #include <stdint.h>
+#include <string.h>
 #include <byteswap.h>
 
 namespace crypto {
 
 /*
  * Ready to use crypto primitives are at the bottom of this header:
+ * crypto::chaskye::Chaskey8
  * crypto::chaskye::Cipher8::Mac
  * crypto::chaskye::Cipher8::Cbc
- * crypto::chaskye::Chaskye8
+ * crypto::chaskye::Cipher8::Cloc
  */
 
 /**
@@ -81,6 +83,13 @@ private:
  * In this mode BlockCipher is used to encrypt and decrypt messages
  * http://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38a.pdf
  * chapter 6.2
+ *
+ * Usage:
+ * 		Cbc<Cipher,Formatter> cbc;
+ * 		cbc.set(key);
+ * 		cbc.init(nonce, length); 				// feed nonce
+ * 		cbc.encrypt(out, datachunk, false);		// feed data by chunks
+ * 		cbc.encrypt(out, lastdatachunk, true);	// feed last data chunk
  */
 template<class Cipher, class Formatter>
 class Cbc : protected Cipher {
@@ -108,6 +117,7 @@ public:
 		 */
 		Cipher::init(key);
 		*this ^= iv;
+		buff.reset();
 	}
 	/**
 	 * Initializes vector by running forward cipher function on nonce
@@ -203,6 +213,15 @@ private:
  * chapter 5.4
  * One primary key and two derived keys are used to strengthen against
  * known CBC-MAC attacks chapter 5.3
+ *
+ * Usage:
+ * 		Mac<Cipher,Formatter> mac;
+ * 		mac.set(key);
+ * 		mac.init(); 							// when reusing instance
+ * 		mac.update(datachunk, false);			// feed data by chunks
+ * 		mac.update(lastdatachunk, true);		// feed last data chunk
+ * 		mac.write(out);							// write computed tag to out
+ * 		mac.verify(tag, taglen);				// or verify tag
  */
 template<class Cipher, class Formatter>
 class Mac : protected Cipher {
@@ -223,7 +242,10 @@ public:
 		init();
 	}
 	/** initializes cipher 													*/
-	inline void init() noexcept { Cipher::init(key); }
+	inline void init() noexcept {
+		Cipher::init(key);
+		buff.reset();
+	}
 	/** processes message chunk msg of length len,
 	 *  final finishes generation by padding the message to the size of
 	 *  block and applying one of derived keys  							*/
@@ -239,7 +261,7 @@ public:
 					}
 					*this ^= *finalkey;
 				} else {
-					if( buff.available() != sizeof(block_t) ) return;
+					if( ! buff.full() ) return;
 				}
 			}
 			encrypt(buff.block());
@@ -250,13 +272,23 @@ public:
 			buff.final(*this);
 		}
 	}
+	/**
+	 * writes computed MAC to output
+	 * if all 16 bytes are not needed, use a stream that trims
+	 */
 	template<class stream>
-	void write(stream&& output) const noexcept {
+	inline void write(stream&& output) const noexcept {
 		output.write(reinterpret_cast<const char*>(Cipher::raw()),Cipher::size());
 	}
-	bool verify(const void* tag) const noexcept {
-		return Cipher::Block::cast(tag) == *this;
+	/**
+	 * verifies computed MAC against provided externally tag
+	 */
+	inline bool
+	verify(const void* tag,uint_fast8_t len=sizeof(block_t)) const noexcept {
+		return memcmp(Cipher::raw(), tag,
+			len < sizeof(block_t) ? len : sizeof(block_t)) == 0;
 	}
+
 protected:
 	inline void encrypt(const block_t& input) noexcept {
 		/* nistspecialpublication800-38b.pdf 6.2
@@ -273,11 +305,265 @@ private:
 	Formatter buff;
 };
 
+/**
+ * BlockCipher in CLOC Mode https://eprint.iacr.org/2014/157.pdf [157]
+ * In this mode CBC is used to provide both authentication and encryption
+ *
+ * Usage:
+ * 		Cloc<Cipher,Formater> cloc;
+ * 		cloc.set(key);
+ * 		cloc.init(); 							// when reusing instance
+ * 		cloc.update(adchunk, length, false);	// feed AD by chunks
+ * 		cloc.update(lastadchunk, length, true); // feed last AD chunk
+ * 		cloc.nonce(nonce, length);				// feed noce
+ * 		cloc.encrypt(out, datachunk, false);	// feed data by chunks
+ * 		cloc.encrypt(out, lastdatachunk, true);	// feed last data chunk
+ */
+template<class Cipher, class Formatter>
+class Cloc {
+public:
+	using Block   = typename Cipher::Block;
+	using item_t  = typename Block::item_t;
+	using block_t = typename Cipher::block_t;
+	using size_t = uint_fast16_t;		/* not expecting chunks larger 64K  */
+	inline Cloc() noexcept {}
+	inline Cloc(const Cloc&) = delete; 	/* no copy constructor 				*/
+	explicit inline Cloc(const block_t&& _key) noexcept  { set(_key); }
+	explicit inline Cloc(const block_t& _key) noexcept { set(_key); }
+
+	/** sets the secret key to use 											*/
+	inline void set(const block_t& _key) noexcept {
+		key = _key;
+		init();
+	}
+	/**
+	 * Initializes vector by running forward cipher function on nonce
+	 */
+	inline void init() noexcept {
+		enc       = key;
+		ozp       = false;
+		finalized = false;
+		fix0guard = false;
+		g1g2guard = false;
+		nonceguard = false;
+		buff.reset();
+	}
+	/** Processes chunk of associated data msg of length len,
+	 *  final finishes generation by padding the message to the size of
+	 *  block and applying one of derived keys.
+	 *  Corresponds to the first part of HASH, see Fig 3 of [157]			*/
+	inline void update(const uint8_t* msg, size_t len, bool final) noexcept {
+		do {
+			buff.append(msg, len);
+			if( ! len ) {
+				if( ! buff.full() ) {
+					if( final )
+						ozp = buff.pad(0x80);		/* apply ozp 			*/
+					else
+						return;
+				}
+			}
+			bool fixed0 = !fix0guard && fix0(enc);
+			update(buff.block());
+			fix0guard = true;
+			if( fixed0 ) h(enc);
+			buff.reset();
+		} while( len );
+	}
+	/** Processes nonce monce of length len in one chunk
+	 *  Corresponds to the last part of HASH, see Fig 3 of [157]			*/
+	inline void nonce(const uint8_t* monce, size_t len) {
+		/* if buffer is not empty call update for final block				*/
+		if( buff.available() ) update(monce,0,true);
+		if( monce )	buff.append(monce, len);
+		buff.pad(0x80);								/* apply ozp 			*/
+		enc ^= buff.block();
+		if( ozp ) f2(enc);
+		else f1(enc);
+		tag = enc;
+		enc.permute();		/* corresponds to V->EK on fig.4				*/
+		enc ^= key;
+		buff.reset();
+		nonceguard = true;
+	}
+	/**
+	 * Encrypts message msg of length len and writes it to the output stream
+	 * if final == true, the message is padded o the size of block
+	 */
+	template<class stream>
+	inline void encrypt(stream&& output, const uint8_t* msg, size_t len, bool final) noexcept {
+		if( ! nonceguard ) nonce(nullptr,0);
+		do {
+			uint_fast8_t size;
+			if( ! (size = process(msg, len, final)) ) return;
+			const block_t& result = buff.result(enc);
+			output.write(reinterpret_cast<const char*>(result), size);
+			prf(false, size);
+			buff.reset();
+		} while( len );
+	}
+
+	/**
+	 * Decrypts ciphertext msg of length len and writes it to the output stream
+	 * if final == true, the message is padded o the size of block
+	 */
+	template<class stream>
+	inline void decrypt(stream&& output, const uint8_t* msg, size_t len, bool final) noexcept {
+		Formatter buf;
+		if( ! nonceguard ) nonce(nullptr,0);
+		do {
+			uint_fast8_t size;
+			if( ! (size = process(msg, len, final)) ) return;
+			const block_t& result = buf.result(enc);
+			output.write(reinterpret_cast<const char*>(result), size);
+			prf(true, size);
+			buff.reset();
+		} while( len );
+	}
+	/**
+	 * writes computed MAC to output
+	 * if all 16 bytes are not needed, use a stream that trims
+	 */
+	template<class stream>
+	void write(stream&& output) const noexcept {
+		finalize();
+		output.write(reinterpret_cast<const char*>(tag.raw()),Cipher::size());
+	}
+	/**
+	 * verifies computed MAC against provided externally tag
+	 */
+	inline bool
+	verify(const void* _tag, uint_fast8_t len=sizeof(block_t)) const noexcept {
+		finalize();
+		return memcmp(tag, _tag,
+			len < sizeof(block_t) ? len : sizeof(block_t)) == 0;
+	}
+
+protected:
+	inline void finalize() const  noexcept {
+		if( ! finalized ) {
+			Formatter::final(tag);
+			finalized = true;
+		}
+	}
+	inline void update(const block_t& input) noexcept {
+		enc  ^= input;
+		enc.permute();
+		enc  ^= key;
+	}
+	inline void cipher() noexcept {
+		tag.permute();
+		tag  ^= key;
+	}
+	inline bool nodata(bool final) noexcept {
+		if( final ) {
+			if( ! g1g2guard && ! buff.available() ) {
+				g1(tag);
+				cipher();
+			} else {
+				buff.pad(0);
+				return false;
+			}
+		}
+		return true;
+	}
+	inline void apply_g2() noexcept {
+		g2(tag);
+		cipher();
+		g1g2guard = true;
+	}
+
+	inline uint_fast8_t process(const uint8_t*& msg, size_t& len, bool final) noexcept {
+		buff.append(msg, len);
+		uint_fast8_t size = buff.available();
+		if( ! buff.full() && nodata(final) ) return 0;
+
+		if( ! g1g2guard ) { /* g2 guard */
+			apply_g2();
+		}
+		if( size == sizeof(block_t) )
+			enc ^= buff.block();  /* enc contains a block of cipher text 		*/
+		else
+			Formatter::xor_bytes(enc.raw(), buff.block(), size);
+		return size;
+	}
+	inline void prf(bool decrypt, uint_fast8_t size) noexcept {
+		if( decrypt ) enc = buff.block();
+		if( size == sizeof(block_t) )
+			tag ^= enc;
+		else
+			Formatter::xor_bytes(tag.raw(), enc, size);
+		cipher();
+		if( size != sizeof(block_t) ) return;
+		fix1(enc);
+		enc.permute();
+		enc ^= key;
+	}
+private:
+	/* CLOC-specific tweak function, chapter 3, [157]						*/
+	/* Courtesy to Markku-Juhani O. Saarinen (mjosaarinen)					*/
+	/* https://github.com/mjosaarinen/brutus/tree/master/crypto_aead_round1/aes128n12clocv1/ref */
+	/** f1(X) = (X[1, 3],X[2, 4],X[1, 2, 3],X[2, 3, 4])						*/
+	static inline void f1(block_t& b) noexcept {
+		b[0]  ^= b[2];			/* X[1, 3]									*/
+		auto t = b[1];
+		b[1]  ^= b[3];			/* X[2, 4]									*/
+		b[3]   = b[2] ^ b[1];	/* X[2, 3, 4]								*/
+		b[2]   = b[0] ^ t;		/* X[1, 2, 3]								*/
+	}
+	/** f2(X) = (X[2],X[3],X[4],X[1, 2])									*/
+	static inline void f2(block_t& b) noexcept {
+		auto t = b[0] ^ b[1];
+		b[0]   = b[1];			/* X[2]										*/
+		b[1]   = b[2];			/* X[2]										*/
+		b[2]   = b[3];			/* X[4]										*/
+		b[3]   = t;				/* X[1, 2]									*/
+	}
+	/** g1(X) = (X[3],X[4],X[1, 2],X[2, 3])									*/
+	static inline void g1(block_t& b) noexcept {
+		auto t = b[0];
+		b[0]   = b[2];			/* X[3]										*/
+		b[2]   = b[1] ^ t;		/* X[1, 2]									*/
+		t      = b[1];
+		b[1]   = b[3];			/* X[4]										*/
+		b[3]   = b[0] ^ t;		/* X[2, 3]									*/
+	}
+	/** g2(X) = (X[2],X[3],X[4],X[1, 2])									*/
+	static inline void g2(block_t& b) noexcept { f2(b); }
+	/** h(X) = (X[1, 2],X[2, 3],X[3, 4],X[1, 2, 4]) 						*/
+	static inline void h(block_t& b) noexcept {
+		b[0] ^= b[1]; 			/* X[1, 2]									*/
+		b[1] ^= b[2];			/* X[2, 3]									*/
+		b[2] ^= b[3];			/* X[3, 4]									*/
+		b[3] ^= b[0];			/* X[1, 2, 4]								*/
+	}
+	static inline bool fix0(block_t& b) noexcept {
+		bool fixed = b[0] & (static_cast<item_t>(1)<<31);
+		b[0] &= ~(static_cast<item_t>(1)<<31);
+		return fixed;
+	}
+	static inline void fix1(block_t& b) noexcept {
+		b[0] |= static_cast<item_t>(1)<<31;
+	}
+
+private:
+	Block key;
+	Formatter buff;
+	Cipher enc;				/* encryption cipher state 						*/
+	mutable Cipher tag;		/* tag processing cipher state 					*/
+	bool g1g2guard;			/* true, if g1 or g2 has been applied			*/
+	bool fix0guard;			/* true, if fix0 has been applied				*/
+	bool nonceguard;		/* true, if nonce() has been called				*/
+	bool ozp;				/* associated data were OZP padded				*/
+	mutable bool finalized;	/* tag has been reordered as little endian		*/
+};
+
+
 namespace details {
 
 struct arch_traits {
 	/* free standing constexpr not yet available,
-	 * therefore it has to be placed inside  a struct 							*/
+	 * therefore it has to be placed inside  a struct 						*/
 	static bool constexpr big_endian = __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__;
 #	ifdef __xtensa__
 	/* unaligned access to uint32_t causes system fault on esp8266			 */
@@ -359,11 +645,14 @@ public:
 		append(msg, len);
 		return sizeof(block_t) - len;
 	}
-	inline void pad(uint8_t chr) noexcept {
+	inline bool pad(uint8_t chr) noexcept {
+		bool padded = false;
 		while( pos < sizeof(data.b) ) {
 			data.b[endian<>::index<sizeof(T)>(pos++)] = chr;
 			chr = 0;
+			padded = true;
 		}
+		return padded;
 	}
 	inline uint_fast8_t available() const noexcept {
 		return pos;
@@ -395,6 +684,16 @@ public:
 			return data.w;
 		}
 		return block;
+	}
+	inline static void
+	xor_bytes(uint8_t* state, const void* ptr, uint_fast8_t len) noexcept {
+		const uint8_t* bytes = reinterpret_cast<const uint8_t*>(ptr);
+		uint_fast8_t i = 0;
+		while(len--) {
+			state[details::endian<>::index<4>(i)] ^=
+					bytes[details::endian<>::index<4>(i)];
+			++i;
+		}
 	}
 private:
 	/* union is used to get proper alignment on data						*/
@@ -451,6 +750,11 @@ public:
 	inline bool full() const noexcept {
 		return available() == sizeof(block_t);
 	}
+	static inline void
+	xor_bytes(uint8_t* state, const void* ptr, uint_fast8_t len) noexcept {
+		const uint8_t* bytes = reinterpret_cast<const uint8_t*>(ptr);
+		while(len--) *state++ ^= *bytes++;
+	}
 private:
 	const block_t* raw = nullptr;
 	uint_fast8_t size = 0;
@@ -480,15 +784,14 @@ public:
 	inline void operator=(const block<T,N>& val) noexcept {
 		assign(val.v);
 	}
-	/* operator== and operator!= are used only in tests */
-	inline bool operator==(const block& val) const noexcept {
+	inline bool operator==(const block_t& val) const noexcept {
 		bool res = true;
-		for(auto i = N; i--; ) res &= v[i] == val.v[i];
+		for(auto i = N; i--; ) res &= v[i] == val[i];
 		return res;
 	}
-	inline bool operator!=(const block& val) const noexcept {
+	inline bool operator!=(const block_t& val) const noexcept {
 		bool res = false;
-		for(auto i = N; i--; ) res |= v[i] != val.v[i];
+		for(auto i = N; i--; ) res |= v[i] != val[i];
 		return res;
 	}
 	
@@ -544,6 +847,10 @@ public:
 	using Block = details::block<uint32_t, 4>;
 	using Cbc = crypto::Cbc<Cipher,details::block_formatter<item_t,count>>;
 	using Mac = crypto::Mac<Cipher,details::block_formatter<item_t,count>>;
+	using Cloc= crypto::Cloc<Cipher,details::block_formatter<item_t,count>>;
+
+	using base::operator=;
+	using base::operator==;
 	/**
 	 * Chaskey transformation
 	 */
@@ -624,8 +931,10 @@ typedef details::block<uint32_t, 4>::block_t block_t;
 /**
  * Cipher8 - implements Chaskey 8-round ciphering
  */
-struct Cipher8 : chaskey::Cipher<8> {
+class Cipher8 : public chaskey::Cipher<8> {
+public:
 	static unsigned constexpr count = chaskey::Cipher<8>::count; /* == 4 */
+	using base::operator=;
 };
 
 /**

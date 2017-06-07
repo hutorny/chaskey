@@ -77,7 +77,6 @@ public:
 	inline void attach(const uint8_t* amsg, size_t alen) noexcept {
 		msg=amsg;
 		len = alen;
-		size_t blocks = len ? (len - 1) / sizeof(block_t) : 0;
 		base::append(msg, len);
 	}
 	inline void next() noexcept {

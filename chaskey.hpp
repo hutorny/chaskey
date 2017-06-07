@@ -26,7 +26,6 @@
 
 #pragma once
 #include <stdint.h>
-#include <string.h>
 #include <byteswap.h>
 
 namespace crypto {
@@ -77,6 +76,16 @@ public:
 private:
 	BlockType data;
 };
+
+namespace details {
+	inline bool equals(const void* a, const void* b, uint_fast8_t len) noexcept {
+		const uint8_t* l { reinterpret_cast<const uint8_t*>(a) };
+		const uint8_t* r { reinterpret_cast<const uint8_t*>(b) };
+		uint8_t res = 0;
+		while(len--) res |= l[len] ^ r[len];
+		return res == 0;
+	}
+}
 
 /**
  * BlockCipher in the Cipher Block Chaining Mode (CBC)
@@ -285,8 +294,8 @@ public:
 	 */
 	inline bool
 	verify(const void* tag,uint_fast8_t len=sizeof(block_t)) const noexcept {
-		return memcmp(Cipher::raw(), tag,
-			len < sizeof(block_t) ? len : sizeof(block_t)) == 0;
+		return details::equals(Cipher::raw(), tag,
+			len < sizeof(block_t) ? len : sizeof(block_t));
 	}
 
 protected:
@@ -435,8 +444,8 @@ public:
 	inline bool
 	verify(const void* _tag, uint_fast8_t len=sizeof(block_t)) const noexcept {
 		finalize();
-		return memcmp(tag, _tag,
-			len < sizeof(block_t) ? len : sizeof(block_t)) == 0;
+		return details::equals(tag, _tag,
+			len < sizeof(block_t) ? len : sizeof(block_t));
 	}
 
 protected:
@@ -481,6 +490,7 @@ protected:
 		if( ! g1g2guard ) { /* g2 guard */
 			apply_g2();
 		}
+		enc.permute();
 		if( size == sizeof(block_t) )
 			enc ^= buff.block();  /* enc contains a block of cipher text 		*/
 		else
@@ -590,8 +600,8 @@ inline constexpr T ror(T val, uint_fast8_t N) noexcept {
  * Rotate left operation
  */
 template<typename T>
-static inline T rol(T x, int b) {
-	return (x >> (32 - b)) | ((x) << (b));
+static inline constexpr T rol(T x, uint_fast8_t N) {
+	return (x >> (sizeof(T)*8 - N)) | ((x) << (N));
 }
 
 /**
@@ -808,7 +818,7 @@ public:
 		return *reinterpret_cast<const block*>(blk);
 	}
 	static constexpr block& cast(void* blk) noexcept {
-		static_assert(static_cast<const block*>(nullptr)->v==nullptr,
+		static_assert(&(static_cast<const block*>(nullptr)->v)==nullptr,
 				"Block bias detected");
 		return *reinterpret_cast<block*>(blk);
 	}
@@ -931,11 +941,33 @@ typedef details::block<uint32_t, 4>::block_t block_t;
 /**
  * Cipher8 - implements Chaskey 8-round ciphering
  */
-class Cipher8 : public chaskey::Cipher<8> {
+class Cipher8 : public Cipher<8> {
 public:
 	static unsigned constexpr count = chaskey::Cipher<8>::count; /* == 4 */
 	using base::operator=;
 };
+
+/**
+ * Cipher8s - implements Chaskey8 with not-inlined permutations
+ * With many instantiations of cipher it may significantly reduce code size
+ */
+class Cipher8s : public Cipher<8> {
+public:
+	typedef Cipher<8> base;
+	static unsigned constexpr count = base::count; /* == 4 */
+	using base::block_t;
+	using base::Block;
+	using Cbc = crypto::Cbc<Cipher8s,details::block_formatter<item_t,count>>;
+	using Mac = crypto::Mac<Cipher8s,details::block_formatter<item_t,count>>;
+	using Cloc= crypto::Cloc<Cipher8s,details::block_formatter<item_t,count>>;
+
+	using base::operator=;
+	using base::operator==;
+	void permute() noexcept;
+	void etumrep() noexcept;
+	static void derive(block_t& v, const block_t& in) noexcept;
+};
+
 
 /**
  * Chaskey8 - implements reference Chaskey message authentication algorithm

@@ -43,6 +43,7 @@ while(in) {
 	//cbc.encrypt(out, (const uint8_t*)msg, len, in.eof());	// decrypt data
 }
 
+// CLOC
 crypto::chaskey::Cipher8::Cloc cloc;	// instantiate a cipher in CLOC mode
 cloc.set(key);							// set the key
 cloc.init(); 							// inity before  reusing instance
@@ -73,14 +74,14 @@ Table below lists benchmarking results for 1M operations on a 32-bytes-long mess
 
 |    Mach    | F, MHz|  Core    |   Arh     | Ref.MAC | ChaCha8 | Cpp MAC |  MAC    | Encrypt | Decrypt |aes128cloc|  CLOC  | 
 |------------|------:|:--------:|-----------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:| 
-|i586        | 3,400 |   i586   | x86_32    |      59 |     137 |      59 |      57 |      55 |      67 |     863 |     155 | 
-|Linkit Smart|   580 | MT7688   | MIPS 32 le|   1,020 |   1,710 |     890 |     930 |     880 |     960 |  13,600 |   3,040 | 
-|Carambola2  |   400 | AR9331   | MIPS 32 be|-- N/A --|   2,500 |   1,730 |    1750 |   2,700 |   2,850 |  19,740 |   7,500 | 
-|Photon      |   120 | STM32F   | ARM  32   |   3,176 |   8,780 |   2,451 |   2,395 |   2,184 |   2,941 |-- N/A --|   7,507 | 
+|i586        | 3,400 |   i586   | x86_32    |      59 |     137 |      59 |      57 |      55 |      67 |     863 |     186 | 
+|Linkit Smart|   580 | MT7688   | MIPS 32 le|   1,020 |   1,710 |     890 |     930 |     880 |     960 |  13,600 |   3,780 | 
+|Carambola2  |   400 | AR9331   | MIPS 32 be|-- N/A --|   2,500 |   1,730 |    1750 |   2,700 |   2,850 |  19,740 |   8,560 | 
+|Photon      |   120 | STM32F   | ARM  32   |   3,176 |   8,780 |   2,451 |   2,395 |   2,184 |   2,941 |-- N/A --|   8,784 | 
 |Teensy3     |    72 | MK20DX   | ARM  32   |   6,390 |  12,926 |   5,220 |   5,346 |   5,054 |   6,055 | 193,700 |  15,450 | 
 |NodeMCU<sup>*</sup>|80| LX106  | RISC 32   |-- N/A --|  12,500 |   8,570 |   7,670 |  12,200 |  12,000 |-- N/A --|  31,300 | 
 |MSP430<sup>*</sup>| 8 | MSP430 | CISC 16   |-- N/A --|-- N/A --| 431,000 | 398,000 | 388,000 | 577,000 |-- N/A --|-- N/A --| 
-|Arduino Mega<sup>*</sup>|8 |ATmega2560|AVR 8|764,000 | 270,000 | 900,000 | 752,000 | 738,000 | 827,000 |-- N/A --|2,610,000| 
+|Arduino Mega<sup>*</sup>|8 |ATmega2560|AVR 8|764,000 | 270,000 | 900,000 | 752,000 | 738,000 | 827,000 |-- N/A --|3,840,000| 
 
 Values are give in ms, All binaries were compiled with gcc option `-O3` -- Optimize most.<br> 
 <sup>*</sup>NodeMCU, MSP430 and Arduino Mega results are extrapolated from tests with 100K operations

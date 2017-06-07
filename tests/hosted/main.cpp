@@ -101,7 +101,7 @@ private:
 	const string msg;
 };
 
-void fillopts(int argc, char * const argv[], options& opts) throw(error) {
+void fillopts(int argc, char * const argv[], options& opts) {
 	char c;
 	while(-1 != (c = getopt(argc, argv, "edsm:cu:o:V:N:tT:b:k:K:i:I:X:a:A:hvqr2"))){
 		switch(c) {
@@ -138,7 +138,7 @@ void fillopts(int argc, char * const argv[], options& opts) throw(error) {
 	}
 }
 
-static inline uint32_t hex(char c) throw(error) {
+static inline uint32_t hex(char c) {
 	if( c == 0 ) return 0;
 	if( c >= '0' && c <= '9' ) return c-'0';
 	if( c >= 'A' && c <= 'F' ) return c-'A' +0xA;
@@ -146,7 +146,7 @@ static inline uint32_t hex(char c) throw(error) {
 	throw error(string("Invalid hex character '") + c + "'");
 }
 
-static inline uint32_t hex(const char * str) throw(error) {
+static inline uint32_t hex(const char * str) {
 	return hex(str[1]) | (hex(str[0]) << 4);
 }
 
@@ -160,7 +160,7 @@ static ostream& operator<<(ostream& o, const block_t& k) {
 	return o << '{' << hex << k[0] << ',' << k[1] << ',' << k[2] << ',' << k[3] << '}';
 }
 
-static void hex2block(const char* str, block_t& key) throw(error) {
+static void hex2block(const char* str, block_t& key) {
 	if( ! str )
 		throw error(string("Missing key, expected 32 hex digits"));
 	if( 128 != (strlen(str) * 4) )
@@ -170,7 +170,7 @@ static void hex2block(const char* str, block_t& key) throw(error) {
 	}
 }
 
-static uint_fast8_t hex2bytes(const char* str, uint8_t* key, uint_fast8_t len) throw(error) {
+static uint_fast8_t hex2bytes(const char* str, uint8_t* key, uint_fast8_t len) {
 	if( ! str )
 		throw error(string("Missing byte string"));
 	uint_fast8_t i;
@@ -181,8 +181,7 @@ static uint_fast8_t hex2bytes(const char* str, uint8_t* key, uint_fast8_t len) t
 	return i;
 }
 
-
-static bool getkeys(const options& opts, block_t& key, block_t& iv) throw(error) {
+static bool getkeys(const options& opts, block_t& key, block_t& iv) {
 	if( opts.keyfile ) {
 		ifstream file(opts.keyfile, fstream::in | fstream::binary);
 		if( ! file ) {

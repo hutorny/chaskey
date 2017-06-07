@@ -442,6 +442,7 @@ function Cloc(Cipher, formatter) {
 			else g2(tag.block());
 			g1g2guard = true;
 		}
+		enc.permute();
 		cipher();
 		tailsize == enc.size ? enc.xor(block) : enc.xor_bytes(block, tailsize);
 	}

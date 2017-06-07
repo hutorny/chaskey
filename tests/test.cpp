@@ -38,9 +38,15 @@
 #ifdef WITH_CHACHA_TEST
 	/* https://rweather.github.io/arduinolibs/classChaCha.html			*/
 #	include <ChaCha.h>
+	// chacha takes ~6200 bytes of ROM on AVR
 #endif
-// chacha takes ~6200 bytes of ROM on AVR
-
+namespace impl {
+#ifdef __AVR__
+	typedef crypto::chaskey::Cipher8s Cipher8;
+#else
+	typedef crypto::chaskey::Cipher8 Cipher8;
+#endif
+}
 struct memcpywrapper {
 	uint8_t * data;
 	size_t size;
@@ -177,15 +183,15 @@ unsigned long bench_cppmac(unsigned long count) {
 
 
 struct blockassignwrapper {
-	crypto::chaskey::Cipher8::Block& data;
+	impl::Cipher8::Block& data;
 	inline void write(const void* src, unsigned) noexcept {
 		data = *reinterpret_cast<const block_t*>(src);
 	}
 };
 unsigned long bench_mac(unsigned long count) {
-	crypto::chaskey::Cipher8::Mac mac;
+	impl::Cipher8::Mac mac;
 	const block_t& key{Test::vectors[0]};
-	crypto::chaskey::Cipher8::Block result;
+	impl::Cipher8::Block result;
 	mac.set(key);
 	auto start = milliseconds();
 	while(count--) {
@@ -230,14 +236,13 @@ unsigned long bench_chacha(unsigned long count) {
 #endif
 
 
-static crypto::chaskey::Cipher8::Block result[2];
+static impl::Cipher8::Block result[2];
 
 
 unsigned long bench_cloc(unsigned long count) {
 	const block_t& key{Test::vectors[0]};
 	uint8_t ad[32] {}, nonce[16] {}, pt[32];
-	crypto::Cloc<crypto::chaskey::Cipher8,
-		details::block_formatter<crypto::chaskey::Cipher8::item_t, crypto::chaskey::Cipher8::count>> cloc;
+	impl::Cipher8::Cloc cloc;
 	cloc.set(key);
 	cloc.init();
 	auto start = milliseconds();
@@ -252,7 +257,7 @@ unsigned long bench_cloc(unsigned long count) {
 unsigned long bench_encrypt(unsigned long count) {
 	const block_t& key{Test::vectors[0]};
 	const block_t& iv{Test::vectors[1]};
-	crypto::chaskey::Cipher8::Cbc cbc;
+	impl::Cipher8::Cbc cbc;
 	cbc.set(key);
 	auto start = milliseconds();
 	while(count--) {
@@ -265,7 +270,7 @@ unsigned long bench_encrypt(unsigned long count) {
 unsigned long bench_decrypt(unsigned long count) {
 	const block_t& key{Test::vectors[0]};
 	const block_t& iv{Test::vectors[1]};
-	crypto::chaskey::Cipher8::Cbc cbc;
+	impl::Cipher8::Cbc cbc;
 	cbc.set(key);
 	auto start = milliseconds();
 	while(count--) {
@@ -399,7 +404,7 @@ unsigned test_head2head(const block_t& v) {
 unsigned test_mac(const block_t& v) {
 	unsigned res = 0;
 	block_t tag = {};
-	crypto::chaskey::Cipher8::Mac mac;
+	impl::Cipher8::Mac mac;
 	block_t subkey1, subkey2;
 	subkeys(subkey1, subkey2, v);
 
@@ -444,7 +449,7 @@ const block_t iv { };
  */
 unsigned test_cbc(const block_t& v) {
 	unsigned res = 0;
-	crypto::chaskey::Cipher8::Cbc cbc;
+	impl::Cipher8::Cbc cbc;
 	uint8_t tmp[64];
 	uint8_t plain[64];
 	cbc.set(v);
@@ -476,7 +481,7 @@ static unsigned test_clocmaster(int i) {
 	unsigned res = 0;
 	memcpywrapper cout{tmp,0};
 	const uint8_t* msg = get_test_message();
-	crypto::chaskey::Chaskey8::Cloc cloc(get_test_vector(i));
+	impl::Cipher8::Cloc cloc(get_test_vector(i));
 	cloc.update(msg + i%5, i, i >= 8);
 	if( i < 8 )
 		cloc.update(msg + i%5, 16 - i, true);
@@ -503,7 +508,7 @@ static unsigned test_clocmaster(int i) {
 	const block_t & tag{ *(const block_t*)(Test::masters[i+63]+size)};
 	if( ! cloc.verify(tag) ) {
 		log.fail("test_master/verify     :'%.*s'\n", len, msg);
-		crypto::chaskey::Cipher8::Block got;
+		impl::Cipher8::Block got;
 		cloc.write(blockassignwrapper{got});
 		log.block(level::error,"got                    :", got);
 		log.block(level::error,"expected               :", tag);
@@ -522,7 +527,7 @@ static unsigned test_clocmaster(int i) {
 static unsigned test_cbcmaster(int i) {
 	unsigned res = 0;
 	uint8_t tmp[64];
-	crypto::chaskey::Cipher8::Cbc cbc;
+	impl::Cipher8::Cbc cbc;
 	cbc.set(Test::vectors[i]);
 	cbc.init(iv);
 	memcpywrapper out{tmp,0};
@@ -545,11 +550,11 @@ static unsigned test_cbcmaster(int i) {
 /**
  * test CBC adinst masters
  */
-unsigned test_master() {
+unsigned test_master(int N = 64) { //N added to prevent loop unrolling
 	unsigned res = 0;
-	for(int i = 1; i < 64; ++i)
+	for(int i = 1; i < N; ++i)
 		res += test_cbcmaster(i);
-	for(int i = 64; i < 80; ++i)
+	for(int i = N; i < 80; ++i)
 		res += test_clocmaster(i-64);
 	return res;
 }
@@ -561,7 +566,7 @@ static char nonce[] = "16  bytes  nonce";
  */
 unsigned test_cloc(const block_t& v) {
 	unsigned res = 0;
-	crypto::chaskey::Cipher8::Cloc cloc;
+	impl::Cipher8::Cloc cloc;
 	uint8_t tmp[64];
 	uint8_t plain[64];
 	cloc.set(v);
@@ -589,8 +594,8 @@ unsigned test_cloc(const block_t& v) {
  */
 unsigned test_clocchunk() {
 	unsigned adlen = 0, datalen = 0;
-	crypto::chaskey::Cipher8::Cloc cloc;
-	crypto::chaskey::Cipher8::Cloc verf;
+	impl::Cipher8::Cloc cloc;
+	impl::Cipher8::Cloc verf;
 	const block_t& v(Test::vectors[0]);
 	uint8_t chunked[64];
 	uint8_t solid[64];

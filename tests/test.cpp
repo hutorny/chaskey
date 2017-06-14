@@ -41,7 +41,7 @@
 	// chacha takes ~6200 bytes of ROM on AVR
 #endif
 namespace impl {
-#ifdef __AVR__
+#if defined(__AVR__) || defined(__MSP430__)
 	typedef crypto::chaskey::Cipher8s Cipher8;
 #else
 	typedef crypto::chaskey::Cipher8 Cipher8;
@@ -572,16 +572,16 @@ unsigned test_cloc(const block_t& v) {
 	cloc.set(v);
 	for(auto i:  {7, 8, 9, 15, 16, 17, 31, 32, 33, 47, 48, 49, 50}) {
 		cloc.init();
-		cloc.update((const uint8_t*)(Test::plaintext + i%4), i, true);
+		cloc.update((const uint8_t*)(Test::plaintext + (i%4)), i, true);
 		cloc.nonce((const uint8_t*)nonce,sizeof(nonce));
 		memcpywrapper wrp{tmp,0};
-		cloc.encrypt(wrp, (const uint8_t*)Test::plaintext + i%6, i, true);
+		cloc.encrypt(wrp, (const uint8_t*)Test::plaintext + (i%6), i, true);
 		cloc.init();
-		cloc.update((const uint8_t*)(Test::plaintext + i%4), i, true);
+		cloc.update((const uint8_t*)(Test::plaintext + (i%4)), i, true);
 		cloc.nonce((const uint8_t*)nonce,sizeof(nonce));
 		cloc.decrypt(memcpywrapper{plain, 0}, tmp, i, true);
-		if( strncmp(Test::plaintext + i%6,(const char*)plain, i) != 0) {
-			log.fail( "test_cloc              :\t'%.*s'\n", i, Test::plaintext + i%6);
+		if( strncmp(Test::plaintext + (i%6),(const char*)plain, i) != 0) {
+			log.fail( "test_cloc              :\t'%.*s'\n", i, Test::plaintext + (i%6));
 			log.error("got                    :\t'%.*s'\n", i, plain);
 			++res;
 		}

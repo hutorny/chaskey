@@ -368,8 +368,10 @@ function Cloc(Cipher, formatter) {
 	
 	function prf(tailsize, block) {
 		block && enc.assign(block);
+		tag.xor(key);
 		cipher(enc);
 		fix1(enc.block());
+		enc.xor(key)
 		enc.permute();
 		tailsize == enc.size ? enc.xor(key) : enc.xor_bytes(key, tailsize);
 	}
@@ -442,7 +444,6 @@ function Cloc(Cipher, formatter) {
 			else g2(tag.block());
 			g1g2guard = true;
 		}
-		enc.permute();
 		cipher();
 		tailsize == enc.size ? enc.xor(block) : enc.xor_bytes(block, tailsize);
 	}

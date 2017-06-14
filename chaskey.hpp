@@ -490,7 +490,6 @@ protected:
 		if( ! g1g2guard ) { /* g2 guard */
 			apply_g2();
 		}
-		enc.permute();
 		if( size == sizeof(block_t) )
 			enc ^= buff.block();  /* enc contains a block of cipher text 		*/
 		else
@@ -503,9 +502,11 @@ protected:
 			tag ^= enc;
 		else
 			Formatter::xor_bytes(tag.raw(), enc, size);
+		tag ^= key;
 		cipher();
 		if( size != sizeof(block_t) ) return;
 		fix1(enc);
+		enc ^= key;
 		enc.permute();
 		enc ^= key;
 	}
@@ -911,6 +912,7 @@ protected:
 		v[1] ^= v[2];
 		v[2]  = rol<item_t>(v[2],16);
 	}
+
 	/**
 	 * Chaskey reverse round
 	 */

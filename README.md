@@ -68,7 +68,7 @@ cbc.set(key);						// set the key
 cbc.init(nonce);					// init  cipher with a nonce
 var cif = cbc.encrypt(message);		// encrypt the message
 ```
-## Perfromace 
+## Performace 
 
 Table below lists benchmarking results for 1M operations on a 32-bytes-long message.
 
@@ -86,7 +86,7 @@ Table below lists benchmarking results for 1M operations on a 32-bytes-long mess
 Values are give in ms, All binaries were compiled with gcc option `-O3` -- Optimize most.<br> 
 <sup>*</sup>NodeMCU, MSP430 and Arduino Mega results are extrapolated from tests with 100K operations
 
-Next table shows same results in normilized form - clock cycles per one operation
+Next table shows same results in normalized form - clock cycles per one operation
 
 |    Mach    | F, MHz|  Core    |   Arh     | Ref. MAC| ChaCha8 | Cpp MAC |  MAC    | Encrypt | Decrypt |aes128cloc|  CLOC  |
 |------------|------:|:--------:|-----------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:|
